@@ -5,7 +5,10 @@ import AiringSection from './components/AiringSection.jsx';
 import VideoPlayer from './components/VideoPlayer.jsx';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
-const apiFetch = (url, options) => fetch(BACKEND_URL + url, options);
+const apiFetch = (url, options = {}) => fetch(BACKEND_URL + url, {
+  ...options,
+  credentials: 'include'
+});
 
 /* =====================
    VIEWS
@@ -389,7 +392,7 @@ export default function App() {
 
     // Conecta ao SSE para acompanhar progresso
     if (sseRef.current) sseRef.current.close();
-    const sse = new EventSource(BACKEND_URL + '/api/bulk/stream');
+    const sse = new EventSource(BACKEND_URL + '/api/bulk/stream', { withCredentials: true });
     sseRef.current = sse;
 
     sse.onmessage = (e) => {
