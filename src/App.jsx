@@ -508,8 +508,8 @@ export default function App() {
               {animes.length.toLocaleString()} animes disponíveis, com acompanhamento de lançamentos e episódios novos em tempo real.
             </p>
             <button className="btn btn-primary hero-play-btn" onClick={() => {
-              if (releases.length > 0) {
-                openPlayer(releases[0].animeSlug, releases[0].number);
+              if (airingAnimes.length > 0) {
+                openDetail(airingAnimes[0]);
               }
             }}>
               <span className="hero-play-icon">▶</span> Assista ao Último Lançamento
@@ -849,7 +849,7 @@ export default function App() {
               { label: 'Em exibição',  value: stats?.airing ?? airingAnimes.length },
               { label: 'Lazy (catálogo)', value: stats?.lazy ?? '—' },
               { label: 'Gêneros',      value: stats?.genres ?? Object.keys(genres).length },
-              { label: 'Releases',     value: stats?.releases ?? releases.length },
+              { label: 'Hoje (Jikan)', value: schedule.length },
             ].map(({ label, value }) => (
               <div key={label} style={{
                 padding: '16px', background: 'var(--bg-card)', borderRadius: 'var(--radius-md)',
