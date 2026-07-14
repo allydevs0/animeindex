@@ -4,7 +4,8 @@ import LatestEpisodes from './components/LatestEpisodes.jsx';
 import AiringSection from './components/AiringSection.jsx';
 import VideoPlayer from './components/VideoPlayer.jsx';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+let BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+if (BACKEND_URL.endsWith('/')) BACKEND_URL = BACKEND_URL.slice(0, -1);
 const apiFetch = (url, options = {}) => fetch(BACKEND_URL + url, {
   ...options,
   credentials: 'include'

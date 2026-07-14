@@ -167,7 +167,7 @@ function broadcastBulk(data) {
 const server = http.createServer(async (req, res) => {
   const ip       = req.socket.remoteAddress || '';
   const url      = new URL(req.url, `http://localhost:${PORT}`);
-  const pathname = url.pathname;
+  let pathname = url.pathname.replace(/\/+/g, '/');
   const method   = req.method;
 
   if (!checkRateLimit(ip)) return respond(res, 429, { error: 'Too many requests' }, 'application/json', req);
