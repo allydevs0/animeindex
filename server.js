@@ -107,13 +107,14 @@ function createSession(username) {
 /* ==========================================
    HELPERS
 ========================================== */
-function respond(res, status, data, contentType = 'application/json') {
+function respond(res, status, data, contentType = 'application/json', req = null) {
   const body = contentType === 'application/json' ? JSON.stringify(data) : data;
   res.writeHead(status, {
     'Content-Type': contentType,
-    'Access-Control-Allow-Origin':  '*',
+    'Access-Control-Allow-Origin':  req ? (req.headers.origin || '*') : '*',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user',
+    'Access-Control-Allow-Credentials': 'true'
   });
   res.end(body);
 }
@@ -132,7 +133,7 @@ function parseBody(req) {
 ========================================== */
 function serveStatic(req, res, urlPath) {
   let filePath = path.join(DIST_DIR, urlPath === '/' ? 'index.html' : urlPath);
-  if (!filePath.startsWith(DIST_DIR)) return respond(res, 403, { error: 'Forbidden' });
+  if (!filePath.startsWith(DIST_DIR)) return respond(res, 403, { error: 'Forbidden' }, 'application/json', req);
   if (!fs.existsSync(filePath)) filePath = path.join(DIST_DIR, 'index.html');
 
   const ext  = path.extname(filePath);
@@ -169,20 +170,22 @@ const server = http.createServer(async (req, res) => {
   const pathname = url.pathname;
   const method   = req.method;
 
-  if (!checkRateLimit(ip)) return respond(res, 429, { error: 'Too many requests' });
+  if (!checkRateLimit(ip)) return respond(res, 429, { error: 'Too many requests' }, 'application/json', req);
 
   if (method === 'OPTIONS') {
     res.writeHead(204, {
-      'Access-Control-Allow-Origin':  '*',
+      'Access-Control-Allow-Origin':  req.headers.origin || '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user',
+      'Access-Control-Allow-Credentials': 'true'
     });
-    return res.end();
+    res.end();
+    return;
   }
 
   if (!pathname.startsWith('/api/')) {
     if (fs.existsSync(DIST_DIR)) {
-      try { serveStatic(req, res, pathname); } catch (err) { respond(res, 500, { error: err.message }); }
+      try { serveStatic(req, res, pathname); } catch (err) { respond(res, 500, { error: err.message }, 'application/json', req); }
     } else {
       respond(res, 200, { message: 'AnimeKaiKai! API — rode npm run dev para o frontend.' });
     }
@@ -490,7 +493,8 @@ const server = http.createServer(async (req, res) => {
       'Content-Type':                'text/event-stream',
       'Cache-Control':               'no-cache',
       'Connection':                  'keep-alive',
-      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Origin': req.headers.origin || '*',
+      'Access-Control-Allow-Credentials': 'true'
     });
     res.write(`data: ${JSON.stringify({ type: 'connected', running: bulkRunning, lastLog: bulkLastLog })}\n\n`);
     bulkClients.add(res);
