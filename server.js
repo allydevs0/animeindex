@@ -253,7 +253,7 @@ const server = http.createServer(async (req, res) => {
 
     const token   = createSession(name);
     const expires = new Date(Date.now() + 30 * 24 * 3600_000).toUTCString();
-    res.setHeader('Set-Cookie', `session=${encodeURIComponent(token)}; HttpOnly; Path=/; Expires=${expires}`);
+    res.setHeader('Set-Cookie', `session=${encodeURIComponent(token)}; HttpOnly; Path=/; Expires=${expires}; SameSite=None; Secure`);
     return respond(res, 200, {
       user: {
         name:        users[name].name,
