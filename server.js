@@ -107,11 +107,12 @@ function createSession(username) {
 /* ==========================================
    HELPERS
 ========================================== */
-function respond(res, status, data, contentType = 'application/json', req = null) {
+function respond(res, status, data, contentType = 'application/json') {
   const body = contentType === 'application/json' ? JSON.stringify(data) : data;
+  const origin = res.req?.headers?.origin || '*';
   res.writeHead(status, {
     'Content-Type': contentType,
-    'Access-Control-Allow-Origin':  req ? (req.headers.origin || '*') : '*',
+    'Access-Control-Allow-Origin':  origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user',
     'Access-Control-Allow-Credentials': 'true'
@@ -133,7 +134,7 @@ function parseBody(req) {
 ========================================== */
 function serveStatic(req, res, urlPath) {
   let filePath = path.join(DIST_DIR, urlPath === '/' ? 'index.html' : urlPath);
-  if (!filePath.startsWith(DIST_DIR)) return respond(res, 403, { error: 'Forbidden' }, 'application/json', req);
+  if (!filePath.startsWith(DIST_DIR)) return respond(res, 403, { error: 'Forbidden' });
   if (!fs.existsSync(filePath)) filePath = path.join(DIST_DIR, 'index.html');
 
   const ext  = path.extname(filePath);
@@ -170,7 +171,7 @@ const server = http.createServer(async (req, res) => {
   let pathname = url.pathname.replace(/\/+/g, '/');
   const method   = req.method;
 
-  if (!checkRateLimit(ip)) return respond(res, 429, { error: 'Too many requests' }, 'application/json', req);
+  if (!checkRateLimit(ip)) return respond(res, 429, { error: 'Too many requests' });
 
   if (method === 'OPTIONS') {
     res.writeHead(204, {
@@ -185,7 +186,7 @@ const server = http.createServer(async (req, res) => {
 
   if (!pathname.startsWith('/api/')) {
     if (fs.existsSync(DIST_DIR)) {
-      try { serveStatic(req, res, pathname); } catch (err) { respond(res, 500, { error: err.message }, 'application/json', req); }
+      try { serveStatic(req, res, pathname); } catch (err) { respond(res, 500, { error: err.message }); }
     } else {
       respond(res, 200, { message: 'AnimeKaiKai! API — rode npm run dev para o frontend.' });
     }
