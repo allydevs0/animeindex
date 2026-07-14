@@ -389,7 +389,7 @@ export default function App() {
 
     // Conecta ao SSE para acompanhar progresso
     if (sseRef.current) sseRef.current.close();
-    const sse = new EventSource('/api/bulk/stream');
+    const sse = new EventSource(BACKEND_URL + '/api/bulk/stream');
     sseRef.current = sse;
 
     sse.onmessage = (e) => {
