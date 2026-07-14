@@ -4,6 +4,9 @@ import LatestEpisodes from './components/LatestEpisodes.jsx';
 import AiringSection from './components/AiringSection.jsx';
 import VideoPlayer from './components/VideoPlayer.jsx';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+const apiFetch = (url, options) => fetch(BACKEND_URL + url, options);
+
 /* =====================
    VIEWS
 ===================== */
@@ -106,10 +109,10 @@ export default function App() {
     setLoading(true);
     try {
       const [animesRes, genresRes, releasesRes, airingRes] = await Promise.all([
-        fetch('/api/animes'),
-        fetch('/api/genres'),
-        fetch('/api/calendar').catch(() => ({ json: () => Promise.resolve([]) })),
-        fetch('/api/airing').catch(() =>   ({ json: () => Promise.resolve([]) })),
+        apiFetch('/api/animes'),
+        apiFetch('/api/genres'),
+        apiFetch('/api/calendar').catch(() => ({ json: () => Promise.resolve([]) })),
+        apiFetch('/api/airing').catch(() =>   ({ json: () => Promise.resolve([]) })),
       ]);
 
       if (!animesRes.ok || !genresRes.ok) throw new Error('Falha ao buscar dados');
@@ -132,7 +135,7 @@ export default function App() {
 
   const fetchStats = useCallback(async () => {
     try {
-      const res = await fetch('/api/stats');
+      const res = await apiFetch('/api/stats');
       if (res.ok) setStats(await res.json());
     } catch {}
   }, []);
@@ -140,7 +143,7 @@ export default function App() {
   const fetchHistory = useCallback(async () => {
     if (!currentUser) return;
     try {
-      const res = await fetch('/api/history');
+      const res = await apiFetch('/api/history');
       if (res.ok) setHistory(await res.json() || {});
     } catch {}
   }, [currentUser]);
@@ -150,14 +153,14 @@ export default function App() {
   ===================== */
   const fetchUsers = useCallback(async () => {
     try {
-      const res = await fetch('/api/users');
+      const res = await apiFetch('/api/users');
       if (res.ok) setUsers(await res.json());
     } catch {}
   }, []);
 
   const loginUser = useCallback(async (username) => {
     try {
-      const res = await fetch('/api/login', {
+      const res = await apiFetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username }),
@@ -197,7 +200,7 @@ export default function App() {
     setPreferences(merged);
     if (updates.theme) applyTheme(updates.theme);
     try {
-      await fetch('/api/preferences', {
+      await apiFetch('/api/preferences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
@@ -249,7 +252,7 @@ export default function App() {
     if (!currentUser) { setShowUserSelector(true); return; }
 
     try {
-      const res = await fetch(`/api/anime/${anime.slug}`);
+      const res = await apiFetch(`/api/anime/${anime.slug}`);
       if (res.ok) {
         setAnimeDetail(await res.json());
       } else {
@@ -278,7 +281,7 @@ export default function App() {
     setLoadingVideo(true);
 
     try {
-      const res = await fetch(`/api/source/${slug}/${ep}`, { headers: { 'x-user': currentUser } });
+      const res = await apiFetch(`/api/source/${slug}/${ep}`, { headers: { 'x-user': currentUser } });
       if (res.ok) {
         const data = await res.json();
         if (!data.error) {
@@ -306,7 +309,7 @@ export default function App() {
     if (!currentUser || !playerSlug || !playerEp) return;
     const anime = animes.find(a => a.slug === playerSlug) || animeDetail;
     try {
-      await fetch('/api/history', {
+      await apiFetch('/api/history', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -329,7 +332,7 @@ export default function App() {
     e.preventDefault();
     setAdminStatus({ type: 'loading', msg: 'Indexando...' });
     try {
-      const res = await fetch('/api/index', {
+      const res = await apiFetch('/api/index', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: adminUrl }),
@@ -353,7 +356,7 @@ export default function App() {
   const handleSync = useCallback(async () => {
     setSyncRunning(true);
     try {
-      const res = await fetch('/api/sync', { method: 'POST' });
+      const res = await apiFetch('/api/sync', { method: 'POST' });
       const data = await res.json();
       toast(data.message || 'Sync iniciado!', 'success');
     } catch {
@@ -373,7 +376,7 @@ export default function App() {
 
     // Inicia importação
     try {
-      await fetch('/api/bulk', {
+      await apiFetch('/api/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: bulkSource }),
