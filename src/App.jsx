@@ -243,9 +243,13 @@ export default function App() {
       const q = searchQuery.toLowerCase();
       list = list.filter(a => a.title?.toLowerCase().includes(q) || a.title_jp?.toLowerCase().includes(q));
     } else if (activeGenre !== 'all') {
-      const slugs  = genres[activeGenre] || [];
-      const slugSet = new Set(slugs);
-      list = list.filter(a => slugSet.has(a.slug));
+      if (activeGenre === 'Dublado') {
+        list = list.filter(a => a.slug.endsWith('-dublado'));
+      } else {
+        const slugs  = genres[activeGenre] || [];
+        const slugSet = new Set(slugs);
+        list = list.filter(a => slugSet.has(a.slug));
+      }
     }
     return list;
   }, [animes, genres, activeGenre, searchQuery]);
@@ -567,6 +571,9 @@ export default function App() {
       <div className="genre-bar">
         <button className={`genre-pill${activeGenre === 'all' ? ' active' : ''}`} onClick={() => { setActiveGenre('all'); setSearchQuery(''); }} id="genre-all">
           🏠 Todos
+        </button>
+        <button className={`genre-pill${activeGenre === 'Dublado' ? ' active' : ''}`} onClick={() => { setActiveGenre('Dublado'); setSearchQuery(''); }} id="genre-dublado" style={{ borderColor: 'var(--accent)', color: activeGenre === 'Dublado' ? '#000' : 'var(--accent)' }}>
+          🇧🇷 Dublado
         </button>
         {Object.keys(genres).map(g => (
           <button key={g} className={`genre-pill${activeGenre === g ? ' active' : ''}`}
