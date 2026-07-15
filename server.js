@@ -94,6 +94,16 @@ function parseCookies(req) {
 }
 
 function getSessionUser(req) {
+  // Verificação de API Key via variável de ambiente do Render
+  const authHeader = req.headers.authorization || '';
+  const xApiKey = req.headers['x-api-key'] || '';
+  const apiKey = process.env.API_KEY;
+  
+  if (apiKey && (authHeader === `Bearer ${apiKey}` || xApiKey === apiKey)) {
+    return 'admin';
+  }
+
+  // Fallback para Cookies
   const cookies = parseCookies(req);
   const token = cookies.session;
   return token ? sessions.get(token) : null;
