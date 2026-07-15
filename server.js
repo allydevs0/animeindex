@@ -25,7 +25,6 @@ import {
   bulkImportAnimeFire,
   bulkImportAnimesOnline,
   bulkImportMeusAnimes,
-  syncAiringAnimes,
   fetchJikanSchedule,
   generateUUID,
   DEFAULT_PREFERENCES,
