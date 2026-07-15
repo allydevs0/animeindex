@@ -794,6 +794,108 @@ async function bulkImportAnimeFire(onProgress = null) {
 }
 
 /* ==========================================
+   BULK IMPORT: ANIMES ONLINE
+========================================== */
+async function bulkImportAnimesOnline(onProgress = null) {
+  console.log('[bulk] Iniciando importação AnimesOnline via Sitemap...');
+  const index = loadIndex();
+  let totalImported = 0;
+  
+  const sitemaps = [
+    'https://animesonlinecc.to/tvshows-sitemap1.xml',
+    'https://animesonlinecc.to/tvshows-sitemap2.xml'
+  ];
+
+  for (const sitemap of sitemaps) {
+    try {
+      const text = await fetchHtml(sitemap);
+      const locRegex = /<loc>(https:\/\/animesonlinecc\.to\/anime\/([^/]+)\/)<\/loc>/g;
+      let match;
+      while ((match = locRegex.exec(text)) !== null) {
+        const rawUrl = match[1];
+        const slug = match[2];
+        if (!slug || index.animes[slug]) continue;
+
+        index.animes[slug] = {
+          title: slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+          slug,
+          cover_url: '',
+          synopsis: '',
+          genres: [],
+          episodes_count: null,
+          airing: false,
+          lazy: true,
+          lazyUrl: rawUrl,
+          source_url: rawUrl,
+          lastSyncedAt: null,
+        };
+        totalImported++;
+      }
+      saveIndex(index);
+      if (onProgress) onProgress({ page: sitemap.split('-').pop(), totalImported });
+      console.log(`[bulk] AnimesOnline ${sitemap} — ${totalImported} itens...`);
+    } catch (err) {
+      console.warn(`[bulk] AnimesOnline sitemap falhou:`, err.message);
+    }
+  }
+
+  saveIndex(index);
+  console.log(`[bulk] AnimesOnline concluído: ${totalImported} animes.`);
+  return { success: true, message: `AnimesOnline importado! ${totalImported} animes.`, totalImported };
+}
+
+/* ==========================================
+   BULK IMPORT: MEUS ANIMES
+========================================== */
+async function bulkImportMeusAnimes(onProgress = null) {
+  console.log('[bulk] Iniciando importação MeusAnimes via Sitemap...');
+  const index = loadIndex();
+  let totalImported = 0;
+  
+  const sitemaps = [
+    'https://meusanimes.blog/tvshows-sitemap1.xml',
+    'https://meusanimes.blog/tvshows-sitemap2.xml'
+  ];
+
+  for (const sitemap of sitemaps) {
+    try {
+      const text = await fetchHtml(sitemap);
+      const locRegex = /<loc>(https:\/\/meusanimes\.blog\/anime\/([^/]+)\/)<\/loc>/g;
+      let match;
+      while ((match = locRegex.exec(text)) !== null) {
+        const rawUrl = match[1];
+        const slug = match[2];
+        if (!slug || index.animes[slug]) continue;
+
+        index.animes[slug] = {
+          title: slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+          slug,
+          cover_url: '',
+          synopsis: '',
+          genres: [],
+          episodes_count: null,
+          airing: false,
+          lazy: true,
+          lazyUrl: rawUrl,
+          source_url: rawUrl,
+          lastSyncedAt: null,
+        };
+        totalImported++;
+      }
+      saveIndex(index);
+      if (onProgress) onProgress({ page: sitemap.split('-').pop(), totalImported });
+      console.log(`[bulk] MeusAnimes ${sitemap} — ${totalImported} itens...`);
+    } catch (err) {
+      console.warn(`[bulk] MeusAnimes sitemap falhou:`, err.message);
+    }
+  }
+
+  saveIndex(index);
+  console.log(`[bulk] MeusAnimes concluído: ${totalImported} animes.`);
+  return { success: true, message: `MeusAnimes importado! ${totalImported} animes.`, totalImported };
+}
+
+/* ==========================================
    GET VIDEO SOURCE
 ========================================== */
 async function getVideoSource(slug, ep) {

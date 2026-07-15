@@ -23,6 +23,9 @@ import {
   syncAiringAnimes,
   bulkImportGoyabu,
   bulkImportAnimeFire,
+  bulkImportAnimesOnline,
+  bulkImportMeusAnimes,
+  syncAiringAnimes,
   fetchJikanSchedule,
   generateUUID,
   DEFAULT_PREFERENCES,
@@ -464,24 +467,29 @@ const server = http.createServer(async (req, res) => {
     bulkRunning = true;
     
     if (source === 'all') {
-      try {
-        const afRes = await bulkImportAnimeFire(progress => broadcastBulk({ type: 'progress', source: 'AnimeFire', ...progress }));
-        const gyRes = await bulkImportGoyabu(progress => broadcastBulk({ type: 'progress', source: 'Goyabu', ...progress }));
-        broadcastBulk({ type: 'done', message: `Importação de todas as fontes concluída! AF: ${afRes.imported}, GY: ${gyRes.imported}` });
-      } catch (err) {
-        broadcastBulk({ type: 'error', message: err.message });
-      } finally {
+      const afRes = await bulkImportAnimeFire(progress => broadcastBulk({ type: 'progress', source: 'AnimeFire', ...progress }));
+      const gyRes = await bulkImportGoyabu(progress => broadcastBulk({ type: 'progress', source: 'Goyabu', ...progress }));
+      const aoRes = await bulkImportAnimesOnline(progress => broadcastBulk({ type: 'progress', source: 'AnimesOnline', ...progress }));
+      const maRes = await bulkImportMeusAnimes(progress => broadcastBulk({ type: 'progress', source: 'MeusAnimes', ...progress }));
+        
+      broadcastBulk({ type: 'success', message: `Todas as fontes importadas (AF: ${afRes.totalImported}, GY: ${gyRes.totalImported}, AO: ${aoRes.totalImported}, MA: ${maRes.totalImported}).` });
+      bulkRunning = false;
+      return respond(res, 200, { success: true, message: 'Todas as fontes importadas!' });
+    }
+
+    let importFn;
+    if (source === 'animefire') importFn = bulkImportAnimeFire;
+    else if (source === 'animesonline') importFn = bulkImportAnimesOnline;
+    else if (source === 'meusanimes') importFn = bulkImportMeusAnimes;
+    else importFn = bulkImportGoyabu; // default fallback
+
+    importFn(progress => broadcastBulk({ type: 'progress', ...progress }))
+      .then(result => {
+        broadcastBulk({ type: 'done', ...result });
         bulkRunning = false;
-      }
-    } else {
-      const importFn = source === 'animefire' ? bulkImportAnimeFire : bulkImportGoyabu;
-      importFn(progress => broadcastBulk({ type: 'progress', ...progress }))
-        .then(result => {
-          broadcastBulk({ type: 'done', ...result });
-          bulkRunning = false;
-        })
-        .catch(err => {
-          broadcastBulk({ type: 'error', message: err.message });
+      })
+      .catch(err => {
+        broadcastBulk({ type: 'error', message: err.message });
           bulkRunning = false;
         });
     }

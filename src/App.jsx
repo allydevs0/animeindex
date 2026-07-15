@@ -1047,9 +1047,11 @@ export default function App() {
               style={{ padding: '8px 12px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text-primary)', fontSize: '0.9rem' }}
               id="bulk-source-select"
             >
-              <option value="goyabu">Goyabu (recomendado)</option>
+              <option value="goyabu">Goyabu (Recomendado)</option>
               <option value="animefire">AnimeFire (via API)</option>
-              <option value="all">Todas as Fontes (Goyabu + AnimeFire)</option>
+              <option value="animesonline">AnimesOnline (via Sitemap)</option>
+              <option value="meusanimes">MeusAnimes (via Sitemap)</option>
+              <option value="all">Todas as Fontes (Goyabu, AF, AO, MA)</option>
             </select>
 
             <button
