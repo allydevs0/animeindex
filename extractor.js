@@ -143,16 +143,28 @@ async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
       signal: AbortSignal.timeout(timeout),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.text();
+    return await res.text();
   } catch (err) {
+    console.error(`[fetchHtml] Proxy failed for ${url}:`, err.message);
     if (!direct) {
-      // Tenta direto como fallback
-      const resDirect = await fetch(url, {
-        headers: DEFAULT_HEADERS,
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!resDirect.ok) throw new Error(`HTTP ${resDirect.status} (direct)`);
-      return resDirect.text();
+      try {
+        // Tenta allorigins como fallback proxy
+        const resOrigin = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {
+          headers: DEFAULT_HEADERS,
+          signal: AbortSignal.timeout(timeout),
+        });
+        if (!resOrigin.ok) throw new Error(`HTTP ${resOrigin.status}`);
+        return await resOrigin.text();
+      } catch (err2) {
+        console.error(`[fetchHtml] AllOrigins failed for ${url}:`, err2.message);
+        // Tenta direto como último fallback
+        const resDirect = await fetch(url, {
+          headers: DEFAULT_HEADERS,
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!resDirect.ok) throw new Error(`HTTP ${resDirect.status} (direct)`);
+        return await resDirect.text();
+      }
     }
     throw err;
   }
