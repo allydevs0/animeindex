@@ -823,7 +823,7 @@ async function bulkImportAnimesOnline(onProgress = null) {
 
   for (const sitemap of sitemaps) {
     try {
-      const text = await fetchHtml(sitemap, { timeout: 60000 });
+      const text = await fetchHtml(sitemap, { timeout: 60000, direct: true });
       const locRegex = /<loc>(https:\/\/animesonlinecc\.to\/anime\/([^/]+)\/)<\/loc>/g;
       let match;
       while ((match = locRegex.exec(text)) !== null) {
@@ -874,7 +874,7 @@ async function bulkImportMeusAnimes(onProgress = null) {
 
   for (const sitemap of sitemaps) {
     try {
-      const text = await fetchHtml(sitemap, { timeout: 60000 });
+      const text = await fetchHtml(sitemap, { timeout: 60000, direct: true });
       const locRegex = /<loc>(https:\/\/meusanimes\.blog\/anime\/([^/]+)\/)<\/loc>/g;
       let match;
       while ((match = locRegex.exec(text)) !== null) {
