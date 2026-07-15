@@ -39,6 +39,13 @@ function progressPct(h) {
   return Math.min(100, (h.time / h.duration) * 100);
 }
 
+function formatTime(secs) {
+  if (!secs) return '00:00';
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 /* =====================
    APP
 ===================== */
@@ -560,7 +567,10 @@ export default function App() {
                 </div>
                 <div className="history-card-info">
                   <div className="history-card-title">{h.title}</div>
-                  <div className="history-card-ep">EP {h.ep}</div>
+                  <div className="history-card-ep" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>EP {h.ep}</span>
+                    <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>{formatTime(h.time)} / {formatTime(h.duration)}</span>
+                  </div>
                 </div>
               </div>
             ))}
@@ -634,6 +644,7 @@ export default function App() {
     const isDubbed = anime?.slug?.endsWith('-dublado');
     const altSlug = isDubbed ? anime?.slug.replace('-dublado', '') : `${anime?.slug}-dublado`;
     const altAnime = animes.find(a => a.slug === altSlug);
+    const episodesHistory = history[anime?.slug]?.episodes || {};
 
     return (
       <div className="main-content animate-in">
@@ -696,16 +707,27 @@ export default function App() {
                     <h2 className="section-title"><span className="section-icon">📺</span>Episódios</h2>
                   </div>
                   <div className="episodes-grid">
-                    {episodes.map(ep => (
-                      <button
-                        key={ep}
-                        className={`ep-btn${watchedEps.has(ep) ? ' watched' : ''}${currentEp === ep ? ' current' : ''}`}
-                        onClick={() => openPlayer(anime.slug, ep)}
-                        id={`ep-btn-${ep}`}
-                      >
-                        {ep}
-                      </button>
-                    ))}
+                    {episodes.map(ep => {
+                      const epData = episodesHistory[ep] || {};
+                      const isFinished = epData.finished || (epData.duration && epData.time/epData.duration >= 0.9);
+                      const isPartial = !isFinished && epData.time > 0;
+                      
+                      let className = 'ep-btn';
+                      if (currentEp === ep) className += ' current';
+                      else if (isFinished) className += ' finished';
+                      else if (isPartial || watchedEps.has(ep)) className += ' watched';
+                      
+                      return (
+                        <button
+                          key={ep}
+                          className={className}
+                          onClick={() => openPlayer(anime.slug, ep)}
+                          id={`ep-btn-${ep}`}
+                        >
+                          {ep}
+                        </button>
+                      );
+                    })}
                   </div>
                 </section>
               )}

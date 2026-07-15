@@ -1177,8 +1177,14 @@ img { display: block; }
 }
 
 .ep-btn.watched {
-  background: rgba(124, 77, 255, 0.15);
+  background: linear-gradient(to top, rgba(124, 77, 255, 0.3) 10%, var(--bg-elevated) 10%);
   border-color: rgba(124, 77, 255, 0.4);
+  color: var(--accent-2);
+}
+
+.ep-btn.finished {
+  background: rgba(124, 77, 255, 0.15);
+  border-color: rgba(124, 77, 255, 0.8);
   color: var(--accent-2);
 }
 
