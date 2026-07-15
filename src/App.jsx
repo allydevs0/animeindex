@@ -83,6 +83,7 @@ export default function App() {
   const [view, setView]                 = useState(VIEW_HOME);
   const [selectedAnime, setSelectedAnime] = useState(null);
   const [animeDetail, setAnimeDetail]   = useState(null);
+  const [relatedSeasons, setRelatedSeasons] = useState([]); // temporadas relacionadas
   const [playerSlug, setPlayerSlug]     = useState(null);
   const [playerEp, setPlayerEp]         = useState(null);
   const [videoSrc, setVideoSrc]         = useState(null);
@@ -290,13 +291,50 @@ export default function App() {
     setView(VIEW_DETAIL);
     setLoadingDetail(true);
     setAnimeDetail(null);
+    setRelatedSeasons([]);
 
     if (!currentUser) { setShowUserSelector(true); return; }
 
     try {
       const res = await apiFetch(`/api/anime/${anime.slug}`);
       if (res.ok) {
-        setAnimeDetail(await res.json());
+        const detail = await res.json();
+        setAnimeDetail(detail);
+
+        // Detectar e buscar temporadas relacionadas
+        // Ex: "mushoku-tensei" -> busca "mushoku-tensei-2", "mushoku-tensei-2-parte-2" etc.
+        const baseSlug = anime.slug
+          .replace(/-dublado$/, '')               // remove -dublado
+          .replace(/-\d+$/, '')                   // remove sufixo numérico final
+          .replace(/-parte-\d+$/, '')             // remove -parte-X
+          .replace(/-season-\d+$/, '')            // remove -season-X
+          .replace(/-s\d+$/, '')                  // remove -sX
+          .replace(/-2nd-season$/, '')            // remove -2nd-season
+          .replace(/-3rd-season$/, '')
+          .replace(/-4th-season$/, '');
+
+        const isDub = anime.slug.endsWith('-dublado');
+        const sisters = animes.filter(a => {
+          if (a.slug === anime.slug) return false;
+          const aBase = a.slug
+            .replace(/-dublado$/, '')
+            .replace(/-\d+$/, '')
+            .replace(/-parte-\d+$/, '')
+            .replace(/-season-\d+$/, '')
+            .replace(/-s\d+$/, '')
+            .replace(/-2nd-season$/, '')
+            .replace(/-3rd-season$/, '')
+            .replace(/-4th-season$/, '');
+          const aIsDub = a.slug.endsWith('-dublado');
+          return aBase === baseSlug && aIsDub === isDub;
+        }).sort((a, b) => a.slug.localeCompare(b.slug));
+
+        if (sisters.length > 0) {
+          const seasonDetails = await Promise.all(
+            sisters.map(s => apiFetch(`/api/anime/${s.slug}`).then(r => r.ok ? r.json() : null))
+          );
+          setRelatedSeasons(seasonDetails.filter(Boolean));
+        }
       } else {
         const errData = await res.json().catch(() => ({}));
         toast(errData.error || errData.message || 'Erro ao carregar detalhes do anime', 'error');
@@ -306,7 +344,7 @@ export default function App() {
     } finally {
       setLoadingDetail(false);
     }
-  }, [currentUser, toast]);
+  }, [currentUser, toast, animes]);
 
   const handleJikanClick = useCallback((jikanAnime) => {
     const slug = jikanAnime.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -701,11 +739,31 @@ export default function App() {
                     </div>
                   )}
 
-                  {episodes.length > 0 && (
-                    <button className="btn-watch" onClick={() => openPlayer(anime.slug, currentEp || episodes[0])} id="btn-watch-first">
-                      ▶ {currentEp ? `Continuar EP ${currentEp}` : `Assistir EP ${episodes[0]}`}
-                    </button>
-                  )}
+                  {(() => {
+                    // Encontra o anime e episódio mais recente (em qualquer temporada)
+                    const allSeasons = [animeDetail, ...relatedSeasons].filter(Boolean);
+                    const lastWatched = allSeasons
+                      .map(s => ({ slug: s.slug, ...history[s.slug] }))
+                      .filter(h => h.ep)
+                      .sort((a, b) => (b.last_watched || 0) - (a.last_watched || 0))[0];
+                    
+                    const firstSeason = animeDetail;
+                    const firstEp = firstSeason?.episodes ? Object.keys(firstSeason.episodes).sort((a,b) => Number(a)-Number(b))[0] : null;
+                    
+                    if (!firstEp && !lastWatched) return null;
+                    
+                    return (
+                      <button className="btn-watch"
+                        onClick={() => lastWatched
+                          ? openPlayer(lastWatched.slug, lastWatched.ep)
+                          : openPlayer(animeDetail.slug, firstEp)
+                        }
+                        id="btn-watch-first"
+                      >
+                        ▶ {lastWatched ? `Continuar EP ${lastWatched.ep}` : `Assistir EP ${firstEp}`}
+                      </button>
+                    );
+                  })()}
 
                   {anime.lazy && episodes.length === 0 && (
                     <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Carregando lista de episódios...</p>
@@ -713,36 +771,93 @@ export default function App() {
                 </div>
               </div>
 
-              {episodes.length > 0 && (
-                <section className="episodes-section">
-                  <div className="section-header">
-                    <h2 className="section-title"><span className="section-icon">📺</span>Episódios</h2>
-                  </div>
-                  <div className="episodes-grid">
-                    {episodes.map(ep => {
-                      const epData = episodesHistory[ep] || {};
-                      const isFinished = epData.finished || (epData.duration && epData.time/epData.duration >= 0.9);
-                      const isPartial = !isFinished && epData.time > 0;
-                      
-                      let className = 'ep-btn';
-                      if (currentEp === ep) className += ' current';
-                      else if (isFinished) className += ' finished';
-                      else if (isPartial || watchedEps.has(ep)) className += ' watched';
-                      
+              {/* Episódios: temporada atual + temporadas relacionadas */}
+              {(() => {
+                // Monta lista de todas as temporadas ordenadas
+                const allSeasons = [animeDetail, ...relatedSeasons].filter(Boolean);
+                const totalEps = allSeasons.reduce((n, s) => n + (s.episodes ? Object.keys(s.episodes).length : 0), 0);
+
+                if (totalEps === 0) return null;
+
+                // Número da temporada a que pertence a temporada principal (1 se não tiver sufixo)
+                const getSeasonNum = (slug) => {
+                  const m = slug?.replace(/-dublado$/, '').match(/-(\d+)$/);
+                  return m ? parseInt(m[1]) : 1;
+                };
+
+                const sortedSeasons = allSeasons.sort((a, b) => getSeasonNum(a.slug) - getSeasonNum(b.slug));
+                const hasMultipleSeasons = sortedSeasons.length > 1;
+
+                return (
+                  <section className="episodes-section">
+                    <div className="section-header">
+                      <h2 className="section-title"><span className="section-icon">📺</span>
+                        {hasMultipleSeasons ? `Episódios (${totalEps} no total)` : 'Episódios'}
+                      </h2>
+                    </div>
+
+                    {sortedSeasons.map((season, si) => {
+                      const sEps = season.episodes ? Object.keys(season.episodes).sort((a, b) => Number(a) - Number(b)) : [];
+                      if (sEps.length === 0) return null;
+                      const sHistory = history[season.slug]?.episodes || {};
+                      const sCurrentEp = history[season.slug]?.ep;
+
                       return (
-                        <button
-                          key={ep}
-                          className={className}
-                          onClick={() => openPlayer(anime.slug, ep)}
-                          id={`ep-btn-${ep}`}
-                        >
-                          {ep}
-                        </button>
+                        <div key={season.slug} style={{ marginBottom: hasMultipleSeasons ? '24px' : '0' }}>
+                          {hasMultipleSeasons && (
+                            <div style={{
+                              display: 'flex', alignItems: 'center', gap: '8px',
+                              margin: '0 0 12px 0', padding: '6px 12px',
+                              background: 'rgba(255,255,255,0.04)',
+                              borderRadius: 'var(--radius-sm)',
+                              borderLeft: '3px solid var(--accent)',
+                            }}>
+                              <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                {season.slug === anime?.slug ? '▶' : '◦'} {season.title}
+                              </span>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                                {sEps.length} eps
+                              </span>
+                              {season.slug !== anime?.slug && sCurrentEp && (
+                                <button
+                                  className="btn-watch"
+                                  style={{ padding: '2px 10px', fontSize: '0.75rem' }}
+                                  onClick={() => openPlayer(season.slug, sCurrentEp)}
+                                >
+                                  ▶ EP {sCurrentEp}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          <div className="episodes-grid">
+                            {sEps.map(ep => {
+                              const epData = sHistory[ep] || {};
+                              const isFinished = epData.finished || (epData.duration && epData.time/epData.duration >= 0.9);
+                              const isPartial = !isFinished && epData.time > 0;
+
+                              let cls = 'ep-btn';
+                              if (sCurrentEp === ep) cls += ' current';
+                              else if (isFinished) cls += ' finished';
+                              else if (isPartial) cls += ' watched';
+
+                              return (
+                                <button
+                                  key={`${season.slug}-${ep}`}
+                                  className={cls}
+                                  onClick={() => openPlayer(season.slug, ep)}
+                                  id={`ep-btn-${season.slug}-${ep}`}
+                                >
+                                  {ep}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
                       );
                     })}
-                  </div>
-                </section>
-              )}
+                  </section>
+                );
+              })()}
             </>
           ) : (
             <div className="empty-state"><div className="empty-icon">😥</div><h3>Anime não encontrado</h3></div>
