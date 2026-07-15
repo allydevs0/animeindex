@@ -145,7 +145,7 @@ async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.text();
   } catch (err) {
-    console.error(`[fetchHtml] Proxy failed for ${url}:`, err.message);
+    console.error(`[fetchHtml] Proxy falhou na URL (${url}) Erro:`, err.message);
     if (!direct) {
       try {
         // Tenta allorigins como fallback proxy
@@ -156,7 +156,7 @@ async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
         if (!resOrigin.ok) throw new Error(`HTTP ${resOrigin.status}`);
         return await resOrigin.text();
       } catch (err2) {
-        console.error(`[fetchHtml] AllOrigins failed for ${url}:`, err2.message);
+        console.error(`[fetchHtml] AllOrigins falhou na URL (${url}) Erro:`, err2.message);
         // Tenta direto como último fallback
         const resDirect = await fetch(url, {
           headers: DEFAULT_HEADERS,
