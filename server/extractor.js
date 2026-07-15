@@ -816,10 +816,19 @@ async function bulkImportAnimesOnline(onProgress = null) {
   const index = loadIndex();
   let totalImported = 0;
   
-  const sitemaps = [
-    'https://animesonlinecc.to/tvshows-sitemap1.xml',
-    'https://animesonlinecc.to/tvshows-sitemap2.xml'
-  ];
+  let sitemaps = [];
+  try {
+    const indexXml = await fetchHtml('https://animesonlinecc.to/sitemap_index.xml', { timeout: 60000, direct: true });
+    const sitemapRegex = /<loc>(https:\/\/animesonlinecc\.to\/.*\.xml)<\/loc>/g;
+    let smMatch;
+    while ((smMatch = sitemapRegex.exec(indexXml)) !== null) {
+      sitemaps.push(smMatch[1]);
+    }
+  } catch (err) {
+    console.warn('[bulk] Falha ao ler sitemap_index.xml do AnimesOnline', err.message);
+    return { success: false, message: 'Falha ao ler sitemap_index.xml' };
+  }
+
 
   for (const sitemap of sitemaps) {
     try {
@@ -867,10 +876,19 @@ async function bulkImportMeusAnimes(onProgress = null) {
   const index = loadIndex();
   let totalImported = 0;
   
-  const sitemaps = [
-    'https://meusanimes.blog/tvshows-sitemap1.xml',
-    'https://meusanimes.blog/tvshows-sitemap2.xml'
-  ];
+  let sitemaps = [];
+  try {
+    const indexXml = await fetchHtml('https://meusanimes.blog/sitemap_index.xml', { timeout: 60000, direct: true });
+    const sitemapRegex = /<loc>(https:\/\/meusanimes\.blog\/.*\.xml)<\/loc>/g;
+    let smMatch;
+    while ((smMatch = sitemapRegex.exec(indexXml)) !== null) {
+      sitemaps.push(smMatch[1]);
+    }
+  } catch (err) {
+    console.warn('[bulk] Falha ao ler sitemap_index.xml do MeusAnimes', err.message);
+    return { success: false, message: 'Falha ao ler sitemap_index.xml' };
+  }
+
 
   for (const sitemap of sitemaps) {
     try {
