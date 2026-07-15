@@ -1,0 +1,17 @@
+{
+  "name": "AnimeKaiKai!",
+  "short_name": "AnimeKaiKai",
+  "description": "Seu homelab de animes favoritos.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F0F13",
+  "theme_color": "#0F0F13",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
