@@ -1,25 +1,10 @@
 {
-  "name": "anime-v2-frontend",
+  "name": "anime-v2-monorepo",
   "private": true,
-  "version": "2.0.0",
-  "type": "module",
   "scripts": {
-    "dev": "vite --port 3000",
-    "build": "vite build",
-    "preview": "vite preview",
-    "server": "node server.js",
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "dotenv": "^17.4.2",
-    "hls.js": "^1.6.16",
-    "mongodb": "^7.5.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "wouter": "^3.10.0"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^6.3.5"
+    "install:all": "npm install --prefix client && npm install --prefix server",
+    "dev:client": "npm run dev --prefix client",
+    "dev:server": "npm run dev --prefix server",
+    "dev": "npm run dev:server & npm run dev:client"
   }
 }
