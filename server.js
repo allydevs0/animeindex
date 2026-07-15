@@ -14,6 +14,7 @@ import { format } from 'util';
 import { initMongoDB } from './db.js';
 import {
   loadIndex,
+  saveIndex,
   loadAnimeFile,
   loadReleases,
   loadUsers,
@@ -389,7 +390,7 @@ const server = http.createServer(async (req, res) => {
       return sNorm === baseNorm || sNorm.startsWith(baseNorm) || baseNorm.startsWith(sNorm);
     });
 
-    // Ordena por "peso de temporada"
+    // Ordenação fallback caso o ano falhe (mesmo que antes)
     function seasonOrder(s) {
       const clean = s.replace(/-dublado/g, '');
       const m = clean.match(/-(\d+)$/) || clean.match(/-(ii|iii|iv|v)$/i);
@@ -398,10 +399,44 @@ const server = http.createServer(async (req, res) => {
       return roman[m[1]?.toLowerCase()] || parseInt(m[1]) || 99;
     }
 
-    // Monta resposta com título inteligente e limpo (sem "Dublado" e sem repetir o nome do anime)
     const baseRawTitle = (baseEntry?.title || '').replace(/\s*[–-]?\s*dublado\s*/gi, '').trim();
+    const seasonsList = [slug, ...related];
+    let updatedIndex = false;
 
-    const seasons = [slug, ...related].sort((a, b) => seasonOrder(a) - seasonOrder(b)).map(s => {
+    // Busca preguiçosa do ano de lançamento no Anilist para cada temporada relacionada
+    await Promise.all(seasonsList.map(async (s) => {
+      const entry = index.animes[s];
+      if (entry && !entry.year) {
+        try {
+          const cleanTitle = (entry.title || s).replace(/\s*[–-]?\s*dublado\s*/gi, '').trim();
+          const q = `query($search: String) { Media(search: $search, type: ANIME, sort: SEARCH_MATCH) { startDate { year } } }`;
+          const res = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: q, variables: { search: cleanTitle } })
+          });
+          const json = await res.json();
+          const yr = json?.data?.Media?.startDate?.year;
+          if (yr) {
+            entry.year = yr;
+            updatedIndex = true;
+          } else {
+            entry.year = 'Desconhecido';
+            updatedIndex = true;
+          }
+        } catch (e) { }
+      }
+    }));
+
+    if (updatedIndex) saveIndex(index);
+
+    // Monta resposta com título usando o ANO como cronologia principal
+    const seasons = seasonsList.sort((a, b) => {
+      const yearA = parseInt(index.animes[a]?.year) || 9999;
+      const yearB = parseInt(index.animes[b]?.year) || 9999;
+      if (yearA !== yearB) return yearA - yearB;
+      return seasonOrder(a) - seasonOrder(b);
+    }).map(s => {
       const entry = index.animes[s];
       const rawTitle = entry?.title || s;
       let displayTitle = rawTitle.replace(/\s*[–-]?\s*dublado\s*/gi, '').trim();
@@ -417,16 +452,19 @@ const server = http.createServer(async (req, res) => {
         else break;
       }
 
+      let remainder = displayTitle;
       if (matchCount > 0) {
-        let remainder = titleWords.slice(matchCount).join(' ').replace(/^[:\-]+/, '').trim();
-        if (!remainder) {
-           remainder = `Temporada ${seasonOrder(s)}`;
-        } else if (remainder.match(/^(\d+)([:\- ]|$)/) || remainder.match(/^(ii|iii|iv|v)([:\- ]|$)/i)) {
-           remainder = `Temporada ${remainder}`;
-        }
-        displayTitle = remainder;
-      } else if (s === slug) {
-         displayTitle = `Temporada 1`;
+        remainder = titleWords.slice(matchCount).join(' ').replace(/^[:\-]+/, '').trim();
+      }
+      
+      // Se tiver ano, formata como: "2023 - Parte 2" ou "2021"
+      const yr = parseInt(entry?.year);
+      if (yr) {
+         if (!remainder || remainder.toLowerCase() === baseRawTitle.toLowerCase()) displayTitle = `${yr}`;
+         else displayTitle = `${yr} - ${remainder}`;
+      } else {
+         if (!remainder) displayTitle = `Temporada ${seasonOrder(s)}`;
+         else displayTitle = remainder;
       }
 
       return {
@@ -435,6 +473,7 @@ const server = http.createServer(async (req, res) => {
         raw_title: rawTitle,
         cover_url: entry?.cover_url || '',
         episodes_count: entry?.episodes_count || null,
+        year: yr || null,
         season_order: seasonOrder(s),
         is_current: s === slug,
       };
