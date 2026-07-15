@@ -398,12 +398,37 @@ const server = http.createServer(async (req, res) => {
       return roman[m[1]?.toLowerCase()] || parseInt(m[1]) || 99;
     }
 
-    // Monta resposta com título limpo (sem "Dublado" redundante no header de temporada)
+    // Monta resposta com título inteligente e limpo (sem "Dublado" e sem repetir o nome do anime)
+    const baseRawTitle = (baseEntry?.title || '').replace(/\s*[–-]?\s*dublado\s*/gi, '').trim();
+
     const seasons = [slug, ...related].sort((a, b) => seasonOrder(a) - seasonOrder(b)).map(s => {
       const entry = index.animes[s];
       const rawTitle = entry?.title || s;
-      // Remove " Dublado" do título para exibição mais limpa (é evidente pelo contexto)
-      const displayTitle = rawTitle.replace(/\s*[–-]?\s*dublado\s*/gi, '').trim();
+      let displayTitle = rawTitle.replace(/\s*[–-]?\s*dublado\s*/gi, '').trim();
+      
+      // Remove o prefixo comum com o título base para evitar redundância na UI
+      function stripPunct(str) { return str.replace(/[^\w\sÀ-ÿ]/g, '').toLowerCase(); }
+      const baseWords = baseRawTitle.split(/\s+/);
+      const titleWords = displayTitle.split(/\s+/);
+      
+      let matchCount = 0;
+      for (let i = 0; i < baseWords.length && i < titleWords.length; i++) {
+        if (stripPunct(baseWords[i]) === stripPunct(titleWords[i])) matchCount++;
+        else break;
+      }
+
+      if (matchCount > 0) {
+        let remainder = titleWords.slice(matchCount).join(' ').replace(/^[:\-]+/, '').trim();
+        if (!remainder) {
+           remainder = `Temporada ${seasonOrder(s)}`;
+        } else if (remainder.match(/^(\d+)([:\- ]|$)/) || remainder.match(/^(ii|iii|iv|v)([:\- ]|$)/i)) {
+           remainder = `Temporada ${remainder}`;
+        }
+        displayTitle = remainder;
+      } else if (s === slug) {
+         displayTitle = `Temporada 1`;
+      }
+
       return {
         slug: s,
         title: displayTitle,
