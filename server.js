@@ -676,7 +676,6 @@ const server = http.createServer(async (req, res) => {
         broadcastBulk({ type: 'error', message: err.message });
           bulkRunning = false;
         });
-    }
 
     return respond(res, 200, { ok: true, message: `Importação de ${source} iniciada. Acompanhe em /api/bulk/stream` });
   }
