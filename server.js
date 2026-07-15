@@ -351,61 +351,72 @@ const server = http.createServer(async (req, res) => {
     const slug = segment.match(/^anime\/(.+)\/related$/)[1];
     const index = loadIndex();
     const allSlugs = Object.keys(index.animes);
-    
-    // Normaliza um slug removendo todos os sufixos de temporada/parte conhecidos
+
+    // Detecta se é dublado olhando em qualquer posição do slug ou título
+    function checkIsDub(s, entry) {
+      return s.includes('-dublado') || (entry?.title || '').toLowerCase().includes('dublado');
+    }
+
+    // Normaliza slug removendo sufixos de dublado, temporada, parte, etc.
     function normalizeSlug(s) {
       return s
-        .replace(/-dublado$/, '')
+        .replace(/-dublado/g, '')              // remove "dublado" de qualquer posição
         .replace(/-(todos-os-episodios)$/, '')
         .replace(/-(completo|completa)$/, '')
         .replace(/-(movie|filme|especial|ova|ona)$/, '')
         .replace(/-(cour|part|parte)-?\d+$/i, '')
         .replace(/-(season|temporada)-?\d+$/i, '')
-        .replace(/-(nd|rd|th|st)-season$/i, '')  // "2nd-season"
-        .replace(/-\d+(nd|rd|th|st)?-season$/i, '')
-        .replace(/-2$|-3$|-4$|-5$|-6$/, '')      // sufixos numéricos simples
-        .replace(/-ii$|-iii$|-iv$|-v$/, '')       // algarismos romanos simples
-        .replace(/-s\d+$/, '');                   // -s2, -s3
+        .replace(/-\d+(nd|rd|th|st)-season$/i, '') // "2nd-season"
+        .replace(/-2$|-3$|-4$|-5$|-6$/, '')         // sufixos numéricos simples
+        .replace(/-ii$|-iii$|-iv$|-v$/, '')          // algarismos romanos simples
+        .replace(/-s\d+$/, '')                       // -s2, -s3
+        .replace(/-+$/, '')                          // hífens sobrando no final
+        .trim();
     }
 
+    const baseEntry = index.animes[slug];
     const baseNorm = normalizeSlug(slug);
-    const isDub = slug.endsWith('-dublado');
+    const isDub = checkIsDub(slug, baseEntry);
 
     // Encontra todos os slugs com a mesma base normalizada e mesmo tipo (dub/leg)
     const related = allSlugs.filter(s => {
       if (s === slug) return false;
-      const sIsDub = s.endsWith('-dublado');
+      const sEntry = index.animes[s];
+      const sIsDub = checkIsDub(s, sEntry);
       if (sIsDub !== isDub) return false;
       const sNorm = normalizeSlug(s);
       // Aceita se a base normalizada for idêntica, ou se um for prefixo do outro
       return sNorm === baseNorm || sNorm.startsWith(baseNorm) || baseNorm.startsWith(sNorm);
     });
 
-    // Ordena por "peso de temporada": primeiro tenta extrair número, depois ordem alfabética
+    // Ordena por "peso de temporada"
     function seasonOrder(s) {
-      const clean = s.replace(/-dublado$/, '');
+      const clean = s.replace(/-dublado/g, '');
       const m = clean.match(/-(\d+)$/) || clean.match(/-(ii|iii|iv|v)$/i);
-      if (!m) return 1; // sem sufixo = temporada 1
+      if (!m) return 1;
       const roman = { ii:2, iii:3, iv:4, v:5 };
       return roman[m[1]?.toLowerCase()] || parseInt(m[1]) || 99;
     }
-    related.sort((a, b) => seasonOrder(a) - seasonOrder(b));
 
-    // Monta resposta com metadados leves (sem episodes completos para ser rápido)
+    // Monta resposta com título limpo (sem "Dublado" redundante no header de temporada)
     const seasons = [slug, ...related].sort((a, b) => seasonOrder(a) - seasonOrder(b)).map(s => {
       const entry = index.animes[s];
-      const order = seasonOrder(s);
+      const rawTitle = entry?.title || s;
+      // Remove " Dublado" do título para exibição mais limpa (é evidente pelo contexto)
+      const displayTitle = rawTitle.replace(/\s*[–-]?\s*dublado\s*/gi, '').trim();
       return {
         slug: s,
-        title: entry?.title || s,
+        title: displayTitle,
+        raw_title: rawTitle,
         cover_url: entry?.cover_url || '',
         episodes_count: entry?.episodes_count || null,
-        season_order: order,
+        season_order: seasonOrder(s),
         is_current: s === slug,
       };
     });
 
     return respond(res, 200, { slug, seasons });
+
   }
 
   // ─── GET /api/anime/:slug ──────────────────────────────────────────
