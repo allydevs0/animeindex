@@ -52,7 +52,10 @@ function formatTime(secs) {
 export default function App() {
   // Auth
   const [users, setUsers]               = useState([]);
-  const [currentUser, setCurrentUser]   = useState(null);
+  const [currentUser, setCurrentUser]   = useState(() => {
+    const last = localStorage.getItem('animekaikai_last_user');
+    return last ? { name: last } : null;
+  });
   const [showUserSelector, setShowUserSelector] = useState(false);
   const [newUsername, setNewUsername]   = useState('');
 
@@ -162,7 +165,7 @@ export default function App() {
   /* =====================
      USERS
   ===================== */
-  const loginUser = useCallback(async (username) => {
+  const loginUser = useCallback(async (username, silent = false) => {
     try {
       const res = await apiFetch('/api/login', {
         method: 'POST',
@@ -182,12 +185,14 @@ export default function App() {
           applyTheme(user.preferences.theme || 'dark');
         }
 
-        toast(
-          user.isNew
-            ? `Bem-vindo, ${username}! Conta criada 🎉`
-            : `Bem-vindo de volta, ${username}! 👋`,
-          'success'
-        );
+        if (!silent) {
+          toast(
+            user.isNew
+              ? `Bem-vindo, ${username}! Conta criada 🎉`
+              : `Bem-vindo de volta, ${username}! 👋`,
+            'success'
+          );
+        }
       }
     } catch {
       toast('Erro ao fazer login', 'error');
@@ -201,11 +206,11 @@ export default function App() {
         const usersData = await res.json();
         setUsers(usersData);
         
-        // Auto-login se houver usuário salvo no localStorage
+        // Auto-login se houver usuário salvo no localStorage (silencioso)
         const lastUser = localStorage.getItem('animekaikai_last_user');
         if (lastUser) {
           // Pequeno delay para evitar loop de estado
-          setTimeout(() => loginUser(lastUser), 100);
+          setTimeout(() => loginUser(lastUser, true), 100);
         } else {
           setShowUserSelector(true);
         }
