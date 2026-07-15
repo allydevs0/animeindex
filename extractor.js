@@ -7,6 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import zlib from 'zlib';
+import { scheduleMongoSave } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,15 +30,15 @@ function ensureDirs() {
 }
 
 function loadJsonGz(filePath, defaultData) {
-  if (fs.existsSync(filePath)) {
-    try { return JSON.parse(zlib.gunzipSync(fs.readFileSync(filePath)).toString('utf-8')); } catch {}
+  const fileKey = path.basename(filePath);
+  if (global.MONGO_CACHE && global.MONGO_CACHE.files[fileKey]) {
+    return JSON.parse(JSON.stringify(global.MONGO_CACHE.files[fileKey]));
   }
-  const uncompressedPath = filePath.replace('.gz', '');
-  if (fs.existsSync(uncompressedPath)) {
+  
+  if (fs.existsSync(filePath)) {
     try {
-      const data = JSON.parse(fs.readFileSync(uncompressedPath, 'utf-8'));
-      saveJsonGz(filePath, data); // Migrate
-      fs.unlinkSync(uncompressedPath); // Cleanup
+      const data = JSON.parse(zlib.gunzipSync(fs.readFileSync(filePath)).toString('utf-8'));
+      if (global.MONGO_CACHE) global.MONGO_CACHE.files[fileKey] = data; // populate cache
       return data;
     } catch {}
   }
@@ -45,7 +46,13 @@ function loadJsonGz(filePath, defaultData) {
 }
 
 function saveJsonGz(filePath, data) {
+  const fileKey = path.basename(filePath);
+  
+  // Save to Local FS (for development/fallback)
   fs.writeFileSync(filePath, zlib.gzipSync(Buffer.from(JSON.stringify(data))));
+  
+  // Schedule sync to MongoDB
+  scheduleMongoSave(fileKey, data);
 }
 
 function loadIndex() {
@@ -62,6 +69,8 @@ function loadIndex() {
 function saveIndex(data) {
   saveJsonGz(INDEX_PATH, data);
 }
+
+
 
 function loadAnimeFile(slug) {
   return loadJsonGz(path.join(ANIMES_DIR, `${slug}.json.gz`), null);

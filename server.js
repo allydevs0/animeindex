@@ -11,6 +11,7 @@ import fs   from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { format } from 'util';
+import { initMongoDB } from './db.js';
 import {
   loadIndex,
   loadAnimeFile,
@@ -533,18 +534,22 @@ const server = http.createServer(async (req, res) => {
   return respond(res, 404, { error: 'Rota não encontrada' });
 });
 
+
+
 /* ==========================================
    BACKGROUND JOBS
 ========================================== */
-server.listen(PORT, () => {
-  console.log(`\n🎌 AnimeKaiKai! API em http://localhost:${PORT}`);
-  console.log('   Endpoints: /api/animes, /api/index, /api/bulk, /api/sync, /api/calendar\n');
+initMongoDB().then(() => {
+  server.listen(PORT, () => {
+    console.log(`\n🎌 AnimeKaiKai! API em http://localhost:${PORT}`);
+    console.log('   Endpoints: /api/animes, /api/index, /api/bulk, /api/sync, /api/calendar\n');
 
-  // Sync automático a cada 1 hora
-  setTimeout(() => {
-    syncAiringAnimes().catch(console.warn);
-    setInterval(() => syncAiringAnimes().catch(console.warn), 60 * 60 * 1000);
-  }, 10_000);
+    // Sync automático a cada 1 hora
+    setTimeout(() => {
+      syncAiringAnimes().catch(console.warn);
+      setInterval(() => syncAiringAnimes().catch(console.warn), 60 * 60 * 1000);
+    }, 10_000);
+  });
 });
 
 export default server;
