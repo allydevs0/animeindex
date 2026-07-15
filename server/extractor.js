@@ -833,11 +833,23 @@ async function bulkImportAnimesOnline(onProgress = null) {
   for (const sitemap of sitemaps) {
     try {
       const text = await fetchHtml(sitemap, { timeout: 60000, direct: true });
-      const locRegex = /<loc>(https:\/\/animesonlinecc\.to\/anime\/([^/]+)\/)<\/loc>/g;
+      const locRegex = /<loc>(https:\/\/animesonlinecc\.to\/(anime|genero)\/([^/]+)\/)<\/loc>/g;
       let match;
       while ((match = locRegex.exec(text)) !== null) {
         const rawUrl = match[1];
-        const slug = match[2];
+        const type = match[2]; // 'anime' ou 'genero'
+        const slug = match[3];
+
+        if (type === 'genero') {
+          // Extrair nome do gênero formatado e adicionar ao index
+          let genreName = decodeURIComponent(slug).split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+          if (!index.genres[genreName]) {
+            index.genres[genreName] = [];
+            totalImported++;
+          }
+          continue;
+        }
+
         if (!slug || index.animes[slug]) continue;
 
         index.animes[slug] = {
@@ -893,11 +905,23 @@ async function bulkImportMeusAnimes(onProgress = null) {
   for (const sitemap of sitemaps) {
     try {
       const text = await fetchHtml(sitemap, { timeout: 60000, direct: true });
-      const locRegex = /<loc>(https:\/\/meusanimes\.blog\/anime\/([^/]+)\/)<\/loc>/g;
+      const locRegex = /<loc>(https:\/\/meusanimes\.blog\/(anime|genero)\/([^/]+)\/)<\/loc>/g;
       let match;
       while ((match = locRegex.exec(text)) !== null) {
         const rawUrl = match[1];
-        const slug = match[2];
+        const type = match[2]; // 'anime' ou 'genero'
+        const slug = match[3];
+
+        if (type === 'genero') {
+          // Extrair nome do gênero formatado e adicionar ao index
+          let genreName = decodeURIComponent(slug).split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+          if (!index.genres[genreName]) {
+            index.genres[genreName] = [];
+            totalImported++;
+          }
+          continue;
+        }
+
         if (!slug || index.animes[slug]) continue;
 
         index.animes[slug] = {
