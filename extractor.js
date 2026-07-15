@@ -1082,6 +1082,8 @@ export {
   // Bulk import
   bulkImportGoyabu,
   bulkImportAnimeFire,
+  bulkImportAnimesOnline,
+  bulkImportMeusAnimes,
   // Calendar
   fetchJikanSchedule,
   slugify,
