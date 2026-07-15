@@ -106,7 +106,13 @@ function getSessionUser(req) {
   // Fallback para Cookies
   const cookies = parseCookies(req);
   const token = cookies.session;
-  return token ? sessions.get(token) : null;
+  if (token && sessions.get(token)) return sessions.get(token);
+
+  // Fallback para header customizado (bypassa bloqueio de cookies em PWAs/iOS)
+  const xUser = req.headers['x-user'];
+  if (xUser) return xUser;
+
+  return null;
 }
 
 function createSession(username) {
