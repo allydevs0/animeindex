@@ -35,3 +35,28 @@
 [2026-07-14T22:42:24.666Z] [INFO] [sync] Sincronizando: Kuroneko to Majo no Kyoushitsu...
 [2026-07-14T22:42:25.641Z] [INFO] [sync] Sincronizando: Tenkou-saki no Seiso Karen na Bishoujo ga, Mukashi Danshi to Omotte Issho ni Asonda Osananajimi Datta Ken...
 [2026-07-14T22:42:26.600Z] [INFO] [sync] Concluído: 3 atualizados, 0 falhas.
+[2026-07-15T16:42:59.445Z] [ERROR] ❌ Erro fatal ao conectar ao MongoDB: Error: querySrv ECONNREFUSED _mongodb._tcp.cluster0.i0as5fi.mongodb.net
+    at QueryReqWrap.onresolve [as oncomplete] (node:internal/dns/promises:293:17) {
+  errno: undefined,
+  code: 'ECONNREFUSED',
+  syscall: 'querySrv',
+  hostname: '_mongodb._tcp.cluster0.i0as5fi.mongodb.net'
+}
+[2026-07-15T16:42:59.462Z] [INFO] 
+🎌 AnimeKaiKai! API em http://localhost:5000
+[2026-07-15T16:42:59.465Z] [INFO]    Endpoints: /api/animes, /api/index, /api/bulk, /api/sync, /api/calendar
+
+[2026-07-15T16:43:03.029Z] [INFO] [DEBUG] GET /api/animes | IP: ::1 | Origin: Nenhum | User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
+[2026-07-15T16:43:03.123Z] [INFO] [DEBUG] GET /api/genres | IP: ::1 | Origin: Nenhum | User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
+[2026-07-15T16:43:03.225Z] [INFO] [DEBUG] GET /api/calendar | IP: ::1 | Origin: Nenhum | User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
+[2026-07-15T16:43:03.307Z] [INFO] [DEBUG] GET /api/airing | IP: ::1 | Origin: Nenhum | User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
+[2026-07-15T16:43:03.384Z] [INFO] [DEBUG] GET /api/users | IP: ::1 | Origin: Nenhum | User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
+[2026-07-15T16:43:03.398Z] [INFO] [DEBUG] GET /api/stats | IP: ::1 | Origin: Nenhum | User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
+[2026-07-15T16:43:06.417Z] [INFO] [DEBUG] POST /api/login | IP: ::1 | Origin: http://localhost:5000 | User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
+[2026-07-15T16:43:09.487Z] [INFO] [sync] Iniciando sincronização de animes em exibição...
+[2026-07-15T16:43:09.546Z] [INFO] [sync] Sincronizando: Kuroneko to Majo no Kyoushitsu...
+[2026-07-15T16:43:10.909Z] [INFO] [sync] Sincronizando: Tenkou-saki no Seiso Karen na Bishoujo ga, Mukashi Danshi to Omotte Issho ni Asonda Osananajimi Datta Ken...
+[2026-07-15T16:43:11.996Z] [INFO] [sync] Sincronizando: Hanaori-san wa Tensei shitemo Kenka ga Shitai...
+[2026-07-15T16:43:13.099Z] [INFO] [sync] Concluído: 3 atualizados, 0 falhas.
+[2026-07-15T16:43:14.504Z] [INFO] [DEBUG] POST /api/login | IP: ::1 | Origin: http://localhost:5000 | User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
+[2026-07-15T16:43:15.182Z] [INFO] [DEBUG] POST /api/login | IP: ::1 | Origin: http://localhost:5000 | User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
