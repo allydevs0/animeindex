@@ -120,10 +120,13 @@ function createSession(username) {
 ========================================== */
 function respond(res, status, data, contentType = 'application/json') {
   const body = contentType === 'application/json' ? JSON.stringify(data) : data;
-  const origin = res.req?.headers?.origin || '*';
+  const origin = res.req?.headers?.origin;
+  const allowed = ['https://animeindex-six.vercel.app', 'http://localhost:5173', 'http://localhost:4173', 'https://animeindex-28ua.onrender.com'];
+  const allowOrigin = (origin && allowed.includes(origin)) ? origin : allowed[0];
+  
   res.writeHead(status, {
     'Content-Type': contentType,
-    'Access-Control-Allow-Origin':  origin,
+    'Access-Control-Allow-Origin':  allowOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user',
     'Access-Control-Allow-Credentials': 'true'
@@ -185,8 +188,12 @@ const server = http.createServer(async (req, res) => {
   if (!checkRateLimit(ip)) return respond(res, 429, { error: 'Too many requests' });
 
   if (method === 'OPTIONS') {
+    const origin = req.headers.origin;
+    const allowed = ['https://animeindex-six.vercel.app', 'http://localhost:5173', 'http://localhost:4173', 'https://animeindex-28ua.onrender.com'];
+    const allowOrigin = (origin && allowed.includes(origin)) ? origin : allowed[0];
+    
     res.writeHead(204, {
-      'Access-Control-Allow-Origin':  req.headers.origin || '*',
+      'Access-Control-Allow-Origin':  allowOrigin,
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user',
       'Access-Control-Allow-Credentials': 'true'
@@ -202,6 +209,13 @@ const server = http.createServer(async (req, res) => {
       respond(res, 200, { message: 'AnimeKaiKai! API — rode npm run dev para o frontend.' });
     }
     return;
+  }
+
+  // Security: Block unauthorized origins
+  const origin = req.headers.origin;
+  const allowedOrigins = ['https://animeindex-six.vercel.app', 'http://localhost:5173', 'http://localhost:4173', 'https://animeindex-28ua.onrender.com'];
+  if (origin && !allowedOrigins.includes(origin)) {
+    return respond(res, 403, { error: 'Forbidden: Origin not allowed' });
   }
 
   // =====================
