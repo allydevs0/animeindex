@@ -66,7 +66,7 @@ function loadIndex() {
   return data;
 }
 
-export function saveIndex(data) {
+function saveIndex(data) {
   saveJsonGz(INDEX_PATH, data);
 }
 
