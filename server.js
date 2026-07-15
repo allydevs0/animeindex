@@ -224,6 +224,7 @@ const server = http.createServer(async (req, res) => {
     })));
   }
 
+
   // ─── POST /api/login ───────────────────────────────────────────────
   if (segment === 'login' && method === 'POST') {
     const body = await parseBody(req);
@@ -385,7 +386,18 @@ const server = http.createServer(async (req, res) => {
     const users = loadUsers();
     if (!users[username]) return respond(res, 404, { error: 'Usuário não encontrado' });
     if (!users[username].history) users[username].history = {};
-    users[username].history[slug] = { ep: String(ep), time: time || 0, duration: duration || 0, title: title || slug, cover_url: cover_url || '', last_watched: Date.now() };
+    
+    const existing = users[username].history[slug] || { episodes: {} };
+    const isFinished = duration > 0 && (time / duration) >= 0.9;
+
+    users[username].history[slug] = { 
+      ...existing,
+      ep: String(ep), time: time || 0, duration: duration || 0, title: title || slug, cover_url: cover_url || '', last_watched: Date.now(),
+      episodes: {
+        ...(existing.episodes || {}),
+        [String(ep)]: { time: time || 0, duration: duration || 0, finished: isFinished }
+      }
+    };
     saveUsers(users);
     return respond(res, 200, { ok: true });
   }
