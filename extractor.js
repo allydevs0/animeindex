@@ -145,28 +145,50 @@ async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.text();
   } catch (err) {
-    console.error(`[fetchHtml] Proxy failed for ${url}:`, err.message);
-    if (!direct) {
+    console.error(`[fetchHtml] ${direct ? 'Direct' : 'Proxy'} failed for ${url}:`, err.message);
+
+    // Se falhou no modo direto, tenta reencaminhar pelo proxy e pelo allorigins
+    if (direct) {
       try {
-        // Tenta allorigins como fallback proxy
-        const resOrigin = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {
+        const resProxy = await fetch(PROXY_URL + encodeURIComponent(url), {
           headers: DEFAULT_HEADERS,
           signal: AbortSignal.timeout(timeout),
         });
-        if (!resOrigin.ok) throw new Error(`HTTP ${resOrigin.status}`);
-        return await resOrigin.text();
-      } catch (err2) {
-        console.error(`[fetchHtml] AllOrigins failed for ${url}:`, err2.message);
-        // Tenta direto como último fallback
-        const resDirect = await fetch(url, {
-          headers: DEFAULT_HEADERS,
-          signal: AbortSignal.timeout(10000),
-        });
-        if (!resDirect.ok) throw new Error(`HTTP ${resDirect.status} (direct)`);
-        return await resDirect.text();
+        if (!resProxy.ok) throw new Error(`HTTP ${resProxy.status}`);
+        return await resProxy.text();
+      } catch (errProxy) {
+        console.error(`[fetchHtml] Proxy fallback failed for ${url}:`, errProxy.message);
+        try {
+          const resOrigin = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {
+            headers: DEFAULT_HEADERS,
+            signal: AbortSignal.timeout(timeout),
+          });
+          if (!resOrigin.ok) throw new Error(`HTTP ${resOrigin.status}`);
+          return await resOrigin.text();
+        } catch (errOrigin) {
+          console.error(`[fetchHtml] AllOrigins fallback failed for ${url}:`, errOrigin.message);
+          throw errOrigin;
+        }
       }
     }
-    throw err;
+
+    // Modo proxy (padrão): tenta allorigins, depois direto, como já era
+    try {
+      const resOrigin = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {
+        headers: DEFAULT_HEADERS,
+        signal: AbortSignal.timeout(timeout),
+      });
+      if (!resOrigin.ok) throw new Error(`HTTP ${resOrigin.status}`);
+      return await resOrigin.text();
+    } catch (err2) {
+      console.error(`[fetchHtml] AllOrigins failed for ${url}:`, err2.message);
+      const resDirect = await fetch(url, {
+        headers: DEFAULT_HEADERS,
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!resDirect.ok) throw new Error(`HTTP ${resDirect.status} (direct)`);
+      return await resDirect.text();
+    }
   }
 }
 
