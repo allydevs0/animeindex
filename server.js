@@ -531,6 +531,15 @@ const server = http.createServer(async (req, res) => {
     return respond(res, 200, { total, airing, lazy, genres, releases: releases.length });
   }
 
+  // ⚡ GET /api/debug/mongo ⚡
+  if (segment === 'debug/mongo' && method === 'GET') {
+    return respond(res, 200, {
+      hasGlobalMongoCache: !!global.MONGO_CACHE,
+      filesInCache: global.MONGO_CACHE ? Object.keys(global.MONGO_CACHE.files) : [],
+      mongoUrlPrefix: process.env.MONGO_URL ? process.env.MONGO_URL.substring(0, 15) + '...' : 'NOT_SET'
+    });
+  }
+
   return respond(res, 404, { error: 'Rota não encontrada' });
 });
 
