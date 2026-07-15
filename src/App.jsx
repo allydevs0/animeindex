@@ -296,55 +296,37 @@ export default function App() {
     if (!currentUser) { setShowUserSelector(true); return; }
 
     try {
+      // 1) Detalhes do anime principal
       const res = await apiFetch(`/api/anime/${anime.slug}`);
-      if (res.ok) {
-        const detail = await res.json();
-        setAnimeDetail(detail);
-
-        // Detectar e buscar temporadas relacionadas
-        // Ex: "mushoku-tensei" -> busca "mushoku-tensei-2", "mushoku-tensei-2-parte-2" etc.
-        const baseSlug = anime.slug
-          .replace(/-dublado$/, '')               // remove -dublado
-          .replace(/-\d+$/, '')                   // remove sufixo numérico final
-          .replace(/-parte-\d+$/, '')             // remove -parte-X
-          .replace(/-season-\d+$/, '')            // remove -season-X
-          .replace(/-s\d+$/, '')                  // remove -sX
-          .replace(/-2nd-season$/, '')            // remove -2nd-season
-          .replace(/-3rd-season$/, '')
-          .replace(/-4th-season$/, '');
-
-        const isDub = anime.slug.endsWith('-dublado');
-        const sisters = animes.filter(a => {
-          if (a.slug === anime.slug) return false;
-          const aBase = a.slug
-            .replace(/-dublado$/, '')
-            .replace(/-\d+$/, '')
-            .replace(/-parte-\d+$/, '')
-            .replace(/-season-\d+$/, '')
-            .replace(/-s\d+$/, '')
-            .replace(/-2nd-season$/, '')
-            .replace(/-3rd-season$/, '')
-            .replace(/-4th-season$/, '');
-          const aIsDub = a.slug.endsWith('-dublado');
-          return aBase === baseSlug && aIsDub === isDub;
-        }).sort((a, b) => a.slug.localeCompare(b.slug));
-
-        if (sisters.length > 0) {
-          const seasonDetails = await Promise.all(
-            sisters.map(s => apiFetch(`/api/anime/${s.slug}`).then(r => r.ok ? r.json() : null))
-          );
-          setRelatedSeasons(seasonDetails.filter(Boolean));
-        }
-      } else {
+      if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        toast(errData.error || errData.message || 'Erro ao carregar detalhes do anime', 'error');
+        toast(errData.error || 'Erro ao carregar detalhes do anime', 'error');
+        return;
+      }
+      setAnimeDetail(await res.json());
+
+      // 2) Temporadas relacionadas via backend (matching inteligente no servidor)
+      const relRes = await apiFetch(`/api/anime/${anime.slug}/related`).catch(() => null);
+      if (relRes?.ok) {
+        const { seasons = [] } = await relRes.json();
+        const others = seasons.filter(s => !s.is_current);
+        if (others.length > 0) {
+          const details = await Promise.all(
+            others.map(s => apiFetch(`/api/anime/${s.slug}`).then(r => r.ok ? r.json() : null))
+          );
+          setRelatedSeasons(
+            details
+              .filter(Boolean)
+              .map((d, i) => ({ ...d, _seasonOrder: others[i].season_order }))
+          );
+        }
       }
     } catch {
       toast('Erro de rede', 'error');
     } finally {
       setLoadingDetail(false);
     }
-  }, [currentUser, toast, animes]);
+  }, [currentUser, toast]);
 
   const handleJikanClick = useCallback((jikanAnime) => {
     const slug = jikanAnime.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -773,19 +755,16 @@ export default function App() {
 
               {/* Episódios: temporada atual + temporadas relacionadas */}
               {(() => {
-                // Monta lista de todas as temporadas ordenadas
-                const allSeasons = [animeDetail, ...relatedSeasons].filter(Boolean);
+                // Monta lista de todas as temporadas — usa _seasonOrder do backend quando disponível
+                const allSeasons = [
+                  { ...animeDetail, _seasonOrder: animeDetail?._seasonOrder ?? 1 },
+                  ...relatedSeasons
+                ].filter(Boolean);
                 const totalEps = allSeasons.reduce((n, s) => n + (s.episodes ? Object.keys(s.episodes).length : 0), 0);
 
                 if (totalEps === 0) return null;
 
-                // Número da temporada a que pertence a temporada principal (1 se não tiver sufixo)
-                const getSeasonNum = (slug) => {
-                  const m = slug?.replace(/-dublado$/, '').match(/-(\d+)$/);
-                  return m ? parseInt(m[1]) : 1;
-                };
-
-                const sortedSeasons = allSeasons.sort((a, b) => getSeasonNum(a.slug) - getSeasonNum(b.slug));
+                const sortedSeasons = [...allSeasons].sort((a, b) => (a._seasonOrder ?? 1) - (b._seasonOrder ?? 1));
                 const hasMultipleSeasons = sortedSeasons.length > 1;
 
                 return (
