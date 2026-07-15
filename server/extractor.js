@@ -833,11 +833,11 @@ async function bulkImportAnimesOnline(onProgress = null) {
   for (const sitemap of sitemaps) {
     try {
       const text = await fetchHtml(sitemap, { timeout: 60000, direct: true });
-      const locRegex = /<loc>(https:\/\/animesonlinecc\.to\/(anime|genero)\/([^/]+)\/)<\/loc>/g;
+      const locRegex = /<loc>(https:\/\/animesonlinecc\.to\/(anime|genero|filme)\/([^/]+)\/)<\/loc>/g;
       let match;
       while ((match = locRegex.exec(text)) !== null) {
         const rawUrl = match[1];
-        const type = match[2]; // 'anime' ou 'genero'
+        const type = match[2]; // 'anime', 'genero' ou 'filme'
         const slug = match[3];
 
         if (type === 'genero') {
@@ -905,14 +905,14 @@ async function bulkImportMeusAnimes(onProgress = null) {
   for (const sitemap of sitemaps) {
     try {
       const text = await fetchHtml(sitemap, { timeout: 60000, direct: true });
-      const locRegex = /<loc>(https:\/\/meusanimes\.blog\/(anime|genero)\/([^/]+)\/)<\/loc>/g;
+      const locRegex = /<loc>(https:\/\/meusanimes\.blog\/(a|g|f)\/([^/]+)\/)<\/loc>/g;
       let match;
       while ((match = locRegex.exec(text)) !== null) {
         const rawUrl = match[1];
-        const type = match[2]; // 'anime' ou 'genero'
+        const type = match[2]; // 'a', 'g' ou 'f'
         const slug = match[3];
 
-        if (type === 'genero') {
+        if (type === 'g') {
           // Extrair nome do gênero formatado e adicionar ao index
           let genreName = decodeURIComponent(slug).split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
           if (!index.genres[genreName]) {
