@@ -289,12 +289,23 @@ export default function App() {
       .replace(/-+$/, '')
       .trim();
 
-    const seen = new Set();
+    const seen = [];
     const mergedList = [];
     for (const a of list) {
       const base = normalizeSlug(a.slug);
-      if (!seen.has(base)) {
-        seen.add(base);
+      const isDub = a.slug.includes('-dublado');
+      
+      let duplicate = false;
+      for (const s of seen) {
+         if (s.isDub !== isDub) continue;
+         if (s.base === base || s.base.startsWith(base) || base.startsWith(s.base)) {
+            duplicate = true;
+            break;
+         }
+      }
+      
+      if (!duplicate) {
+        seen.push({ base, isDub });
         // Exibe o título mais limpo (sem "Dublado" e sem número da temporada se possível)
         const cleanTitle = (a.title || a.slug).replace(/\s*[–-]?\s*dublado\s*/gi, '').trim();
         mergedList.push({ ...a, title: cleanTitle });
@@ -313,14 +324,47 @@ export default function App() {
   const showHero = activeGenre === 'all' && !searchQuery;
 
   /* =====================
+     URL SYNCING & INITIAL LOAD
+  ===================== */
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      if (path === '/' || path === '') {
+        setView(VIEW_HOME);
+        setSelectedAnime(null);
+        setPlayerSlug(null);
+        setPlayerEp(null);
+      } else if (path.startsWith('/admin')) {
+        setView(VIEW_ADMIN);
+      } else if (path.startsWith('/anime/')) {
+        const parts = path.split('/'); // ["", "anime", "slug", "ep", "num"]
+        const slug = parts[2];
+        if (parts[3] === 'ep' && parts[4]) {
+          openPlayer(slug, parts[4], false);
+        } else {
+          openDetail({ slug }, false);
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    if (window.location.pathname !== '/') {
+      handlePopState();
+    }
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [/* executado apenas no mount para anexar os listeners */]);
+
+  /* =====================
      NAVIGATION
   ===================== */
-  const openDetail = useCallback(async (anime) => {
+  const openDetail = useCallback(async (anime, pushUrl = true) => {
     setSelectedAnime(anime);
     setView(VIEW_DETAIL);
     setLoadingDetail(true);
     setAnimeDetail(null);
     setRelatedSeasons([]);
+
+    if (pushUrl) window.history.pushState({ view: VIEW_DETAIL, slug: anime.slug }, '', `/anime/${anime.slug}`);
 
     if (!currentUser) { setShowUserSelector(true); return; }
 
@@ -362,7 +406,7 @@ export default function App() {
     openDetail({ slug, title: jikanAnime.title, cover_url: jikanAnime.cover_url });
   }, [openDetail]);
 
-  const openPlayer = useCallback(async (slug, ep) => {
+  const openPlayer = useCallback(async (slug, ep, pushUrl = true) => {
     if (!currentUser) { setShowUserSelector(true); return; }
 
     setPlayerSlug(slug);
@@ -370,6 +414,8 @@ export default function App() {
     setView(VIEW_PLAYER);
     setVideoSrc(null);
     setLoadingVideo(true);
+
+    if (pushUrl) window.history.pushState({ view: VIEW_PLAYER, slug, episode: ep }, '', `/anime/${slug}/ep/${ep}`);
 
     try {
       const res = await apiFetch(`/api/source/${slug}/${ep}`);
@@ -412,9 +458,17 @@ export default function App() {
   }, [currentUser, playerSlug, playerEp, animes, animeDetail]);
 
   const goBack = useCallback(() => {
-    if (view === VIEW_PLAYER) { setView(VIEW_DETAIL); setVideoSrc(null); }
-    else { setView(VIEW_HOME); setSelectedAnime(null); setAnimeDetail(null); }
-  }, [view]);
+    if (view === VIEW_PLAYER) { 
+      setView(VIEW_DETAIL); 
+      setVideoSrc(null); 
+      window.history.pushState({ view: VIEW_DETAIL, slug: playerSlug }, '', `/anime/${playerSlug}`);
+    } else { 
+      setView(VIEW_HOME); 
+      setSelectedAnime(null); 
+      setAnimeDetail(null); 
+      window.history.pushState({ view: VIEW_HOME }, '', '/');
+    }
+  }, [view, playerSlug]);
 
   /* =====================
      ADMIN — Indexar anime
