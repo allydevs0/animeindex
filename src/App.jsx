@@ -624,6 +624,9 @@ export default function App() {
       Object.entries(history).filter(([slug]) => slug === anime?.slug).flatMap(([, h]) => [String(h.ep)])
     );
     const currentEp = history[anime?.slug]?.ep;
+    const isDubbed = anime?.slug?.endsWith('-dublado');
+    const altSlug = isDubbed ? anime?.slug.replace('-dublado', '') : `${anime?.slug}-dublado`;
+    const altAnime = animes.find(a => a.slug === altSlug);
 
     return (
       <div className="main-content animate-in">
@@ -642,13 +645,21 @@ export default function App() {
                 <div className="detail-info">
                   <h1 className="detail-title">{anime.title}</h1>
 
-                  <div className="detail-badges">
-                    {anime.airing && <span className="badge badge-airing"><span className="dot" /> Em exibição</span>}
-                    {anime.lazy   && <span className="badge badge-lazy">Episódios lazy</span>}
+                   <div className="detail-meta">
+                    {anime.airing && <span className="status-badge" style={{ background: '#3b82f6', color: '#fff' }}>Em Lançamento</span>}
                     {episodes.length > 0 && (
-                      <span className="badge" style={{ background: 'rgba(255,255,255,0.1)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                      <span className="status-badge">
                         📺 {episodes.length} episódios
                       </span>
+                    )}
+                    {altAnime && (
+                      <button 
+                        className="btn-watch" 
+                        style={{ padding: '4px 12px', fontSize: '0.8rem', marginLeft: '10px', background: 'var(--accent)', color: 'var(--text)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                        onClick={() => openDetail(altAnime)}
+                      >
+                        {isDubbed ? '🇯🇵 Mudar para Legendado' : '🇧🇷 Mudar para Dublado'}
+                      </button>
                     )}
                   </div>
 
