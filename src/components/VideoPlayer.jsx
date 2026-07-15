@@ -1,9 +1,20 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 
-export default function VideoPlayer({ src, onEnded, type = 'video' }) {
+export default function VideoPlayer({ src, onEnded, onProgress, type = 'video' }) {
   const videoRef = useRef(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const lastProgressTime = useRef(0);
+
+  const handleTimeUpdate = useCallback(() => {
+    if (!videoRef.current || !onProgress) return;
+    const now = Date.now();
+    // Throttle: envia no máximo a cada 10 segundos
+    if (now - lastProgressTime.current > 10000) {
+      lastProgressTime.current = now;
+      onProgress(videoRef.current.currentTime, videoRef.current.duration);
+    }
+  }, [onProgress]);
 
   useEffect(() => {
     setLoading(true);
@@ -70,6 +81,7 @@ export default function VideoPlayer({ src, onEnded, type = 'video' }) {
         ref={videoRef}
         controls
         onEnded={onEnded}
+        onTimeUpdate={handleTimeUpdate}
         onPlay={() => setLoading(false)}
         style={{ width: '100%', height: '100%', display: loading && !error ? 'none' : 'block' }}
       />

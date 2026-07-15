@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react';
 import AnimeCard from './components/AnimeCard.jsx';
 import LatestEpisodes from './components/LatestEpisodes.jsx';
 import AiringSection from './components/AiringSection.jsx';
@@ -257,10 +257,12 @@ export default function App() {
   /* =====================
      FILTERED ANIMES
   ===================== */
+  const deferredSearch = useDeferredValue(searchQuery);
+
   const filteredAnimes = useMemo(() => {
     let list = animes;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+    if (deferredSearch.trim()) {
+      const q = deferredSearch.toLowerCase();
       list = list.filter(a => a.title?.toLowerCase().includes(q) || a.title_jp?.toLowerCase().includes(q));
     } else if (activeGenre !== 'all') {
       if (activeGenre === 'Dublado') {
@@ -271,8 +273,35 @@ export default function App() {
         list = list.filter(a => slugSet.has(a.slug));
       }
     }
-    return list;
-  }, [animes, genres, activeGenre, searchQuery]);
+
+    // Mescla franquias (mostra apenas 1 card base para todas as temporadas)
+    const normalizeSlug = (s) => s
+      .replace(/-dublado/g, '')
+      .replace(/-(todos-os-episodios)$/, '')
+      .replace(/-(completo|completa)$/, '')
+      .replace(/-(movie|filme|especial|ova|ona)$/, '')
+      .replace(/-(cour|part|parte)-?\d+$/i, '')
+      .replace(/-(season|temporada)-?\d+$/i, '')
+      .replace(/-\d+(nd|rd|th|st)-season$/i, '')
+      .replace(/-2$|-3$|-4$|-5$|-6$/, '')
+      .replace(/-ii$|-iii$|-iv$|-v$/, '')
+      .replace(/-s\d+$/, '')
+      .replace(/-+$/, '')
+      .trim();
+
+    const seen = new Set();
+    const mergedList = [];
+    for (const a of list) {
+      const base = normalizeSlug(a.slug);
+      if (!seen.has(base)) {
+        seen.add(base);
+        // Exibe o título mais limpo (sem "Dublado" e sem número da temporada se possível)
+        const cleanTitle = (a.title || a.slug).replace(/\s*[–-]?\s*dublado\s*/gi, '').trim();
+        mergedList.push({ ...a, title: cleanTitle });
+      }
+    }
+    return mergedList;
+  }, [animes, genres, activeGenre, deferredSearch]);
 
   const historyEntries = useMemo(() =>
     Object.entries(history)
@@ -819,16 +848,17 @@ export default function App() {
                               else if (isFinished) cls += ' finished';
                               else if (isPartial) cls += ' watched';
 
-                              return (
-                                <button
-                                  key={`${season.slug}-${ep}`}
-                                  className={cls}
-                                  onClick={() => openPlayer(season.slug, ep)}
-                                  id={`ep-btn-${season.slug}-${ep}`}
-                                >
-                                  {ep}
-                                </button>
-                              );
+                                return (
+                                  <button
+                                    key={`${season.slug}-${ep}`}
+                                    className={cls}
+                                    onClick={() => openPlayer(season.slug, ep)}
+                                    id={`ep-btn-${season.slug}-${ep}`}
+                                    aria-label={`Assistir episódio ${ep}`}
+                                  >
+                                    {ep}
+                                  </button>
+                                );
                             })}
                           </div>
                         </div>
@@ -877,7 +907,10 @@ export default function App() {
               <VideoPlayer src={videoSrc} type={videoType} onProgress={saveProgress} onEnded={() => nextEp && openPlayer(playerSlug, nextEp)} />
             ) : (
               <div className="player-loading">
-                <p style={{ color: '#ff4d7f' }}>❌ Não foi possível carregar o episódio</p>
+                <p style={{ color: '#ff4d7f', marginBottom: '16px' }}>❌ Não foi possível carregar o episódio</p>
+                <button className="btn btn-ghost" onClick={() => openPlayer(playerSlug, playerEp)} style={{ border: '1px solid var(--border)' }}>
+                  ↻ Tentar Novamente
+                </button>
               </div>
             )}
           </div>
@@ -898,7 +931,8 @@ export default function App() {
             <div className="player-ep-grid">
               {allEps.map(ep => (
                 <button key={ep} className={`ep-btn${String(ep) === String(playerEp) ? ' current' : ''}`}
-                  onClick={() => openPlayer(playerSlug, ep)} id={`player-ep-${ep}`}>
+                  onClick={() => openPlayer(playerSlug, ep)} id={`player-ep-${ep}`}
+                  aria-label={`Assistir episódio ${ep}`}>
                   {ep}
                 </button>
               ))}
