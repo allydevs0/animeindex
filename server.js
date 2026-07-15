@@ -185,6 +185,11 @@ const server = http.createServer(async (req, res) => {
   let pathname = url.pathname.replace(/\/+/g, '/');
   const method   = req.method;
 
+  // Debug log para ver de onde vêm as requests
+  if (pathname.startsWith('/api/')) {
+    console.log(`[DEBUG] ${method} ${pathname} | IP: ${ip} | Origin: ${req.headers.origin || 'Nenhum'} | User-Agent: ${req.headers['user-agent']?.substring(0, 50)}`);
+  }
+
   if (!checkRateLimit(ip)) return respond(res, 429, { error: 'Too many requests' });
 
   if (method === 'OPTIONS') {
