@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, useDeferredValue } from 'react';
 import AnimeCard from './components/AnimeCard.jsx';
 import LatestEpisodes from './components/LatestEpisodes.jsx';
 import AiringSection from './components/AiringSection.jsx';
@@ -6,10 +6,17 @@ import VideoPlayer from './components/VideoPlayer.jsx';
 
 let BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 if (BACKEND_URL.endsWith('/')) BACKEND_URL = BACKEND_URL.slice(0, -1);
-const apiFetch = (url, options = {}) => fetch(BACKEND_URL + url, {
-  ...options,
-  credentials: 'include'
-});
+const apiFetch = (url, options = {}) => {
+  const user = localStorage.getItem('animekaikai_last_user');
+  const headers = { ...options.headers };
+  if (user) headers['x-user'] = user;
+  
+  return fetch(BACKEND_URL + url, {
+    ...options,
+    headers,
+    credentials: 'include'
+  });
+};
 
 /* =====================
    VIEWS
@@ -39,13 +46,23 @@ function progressPct(h) {
   return Math.min(100, (h.time / h.duration) * 100);
 }
 
+function formatTime(secs) {
+  if (!secs) return '00:00';
+  const m = Math.floor(secs / 60);
+  const s = Math.floor(secs % 60);
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
 /* =====================
    APP
 ===================== */
 export default function App() {
   // Auth
   const [users, setUsers]               = useState([]);
-  const [currentUser, setCurrentUser]   = useState(null);
+  const [currentUser, setCurrentUser]   = useState(() => {
+    const last = localStorage.getItem('animekaikai_last_user');
+    return last ? { name: last } : null;
+  });
   const [showUserSelector, setShowUserSelector] = useState(false);
   const [newUsername, setNewUsername]   = useState('');
 
@@ -66,6 +83,7 @@ export default function App() {
   const [view, setView]                 = useState(VIEW_HOME);
   const [selectedAnime, setSelectedAnime] = useState(null);
   const [animeDetail, setAnimeDetail]   = useState(null);
+  const [relatedSeasons, setRelatedSeasons] = useState([]); // temporadas relacionadas
   const [playerSlug, setPlayerSlug]     = useState(null);
   const [playerEp, setPlayerEp]         = useState(null);
   const [videoSrc, setVideoSrc]         = useState(null);
@@ -155,14 +173,7 @@ export default function App() {
   /* =====================
      USERS
   ===================== */
-  const fetchUsers = useCallback(async () => {
-    try {
-      const res = await apiFetch('/api/users');
-      if (res.ok) setUsers(await res.json());
-    } catch {}
-  }, []);
-
-  const loginUser = useCallback(async (username) => {
+  const loginUser = useCallback(async (username, silent = false) => {
     try {
       const res = await apiFetch('/api/login', {
         method: 'POST',
@@ -174,6 +185,7 @@ export default function App() {
         const user = data.user || { name: username };
         setCurrentUser(user);
         setShowUserSelector(false);
+        localStorage.setItem('animekaikai_last_user', user.name);
 
         // Aplica preferências salvas
         if (user.preferences) {
@@ -181,17 +193,40 @@ export default function App() {
           applyTheme(user.preferences.theme || 'dark');
         }
 
-        toast(
-          user.isNew
-            ? `Bem-vindo, ${username}! Conta criada 🎉`
-            : `Bem-vindo de volta, ${username}! 👋`,
-          'success'
-        );
+        if (!silent) {
+          toast(
+            user.isNew
+              ? `Bem-vindo, ${username}! Conta criada 🎉`
+              : `Bem-vindo de volta, ${username}! 👋`,
+            'success'
+          );
+        }
       }
     } catch {
       toast('Erro ao fazer login', 'error');
     }
   }, [toast]);
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/users');
+      if (res.ok) {
+        const usersData = await res.json();
+        setUsers(usersData);
+        
+        // Auto-login se houver usuário salvo no localStorage (silencioso)
+        const lastUser = localStorage.getItem('animekaikai_last_user');
+        if (lastUser) {
+          // Pequeno delay para evitar loop de estado
+          setTimeout(() => loginUser(lastUser, true), 100);
+        } else {
+          setShowUserSelector(true);
+        }
+      }
+    } catch {}
+  }, [loginUser]);
+
+  
 
   /* Aplica o tema no <html> */
   function applyTheme(theme) {
@@ -222,18 +257,62 @@ export default function App() {
   /* =====================
      FILTERED ANIMES
   ===================== */
+  const deferredSearch = useDeferredValue(searchQuery);
+
   const filteredAnimes = useMemo(() => {
     let list = animes;
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+    if (deferredSearch.trim()) {
+      const q = deferredSearch.toLowerCase();
       list = list.filter(a => a.title?.toLowerCase().includes(q) || a.title_jp?.toLowerCase().includes(q));
     } else if (activeGenre !== 'all') {
-      const slugs  = genres[activeGenre] || [];
-      const slugSet = new Set(slugs);
-      list = list.filter(a => slugSet.has(a.slug));
+      if (activeGenre === 'Dublado') {
+        list = list.filter(a => a.slug.endsWith('-dublado'));
+      } else {
+        const slugs  = genres[activeGenre] || [];
+        const slugSet = new Set(slugs);
+        list = list.filter(a => slugSet.has(a.slug));
+      }
     }
-    return list;
-  }, [animes, genres, activeGenre, searchQuery]);
+
+    // Mescla franquias (mostra apenas 1 card base para todas as temporadas)
+    const normalizeSlug = (s) => s
+      .replace(/-dublado/g, '')
+      .replace(/-(todos-os-episodios)$/, '')
+      .replace(/-(completo|completa)$/, '')
+      .replace(/-(movie|filme|especial|ova|ona)$/, '')
+      .replace(/-(cour|part|parte)-?\d+$/i, '')
+      .replace(/-(season|temporada)-?\d+$/i, '')
+      .replace(/-\d+(nd|rd|th|st)-season$/i, '')
+      .replace(/-2$|-3$|-4$|-5$|-6$/, '')
+      .replace(/-ii$|-iii$|-iv$|-v$/, '')
+      .replace(/-s\d+$/, '')
+      .replace(/-+$/, '')
+      .trim();
+
+    const seen = [];
+    const mergedList = [];
+    for (const a of list) {
+      const base = normalizeSlug(a.slug);
+      const isDub = a.slug.includes('-dublado');
+      
+      let duplicate = false;
+      for (const s of seen) {
+         if (s.isDub !== isDub) continue;
+         if (s.base === base || s.base.startsWith(base) || base.startsWith(s.base)) {
+            duplicate = true;
+            break;
+         }
+      }
+      
+      if (!duplicate) {
+        seen.push({ base, isDub });
+        // Exibe o título mais limpo (sem "Dublado" e sem número da temporada se possível)
+        const cleanTitle = (a.title || a.slug).replace(/\s*[–-]?\s*dublado\s*/gi, '').trim();
+        mergedList.push({ ...a, title: cleanTitle });
+      }
+    }
+    return mergedList;
+  }, [animes, genres, activeGenre, deferredSearch]);
 
   const historyEntries = useMemo(() =>
     Object.entries(history)
@@ -245,23 +324,75 @@ export default function App() {
   const showHero = activeGenre === 'all' && !searchQuery;
 
   /* =====================
+     URL SYNCING & INITIAL LOAD
+  ===================== */
+  useEffect(() => {
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      if (path === '/' || path === '') {
+        setView(VIEW_HOME);
+        setSelectedAnime(null);
+        setPlayerSlug(null);
+        setPlayerEp(null);
+      } else if (path.startsWith('/admin')) {
+        setView(VIEW_ADMIN);
+      } else if (path.startsWith('/anime/')) {
+        const parts = path.split('/'); // ["", "anime", "slug", "ep", "num"]
+        const slug = parts[2];
+        if (parts[3] === 'ep' && parts[4]) {
+          openPlayer(slug, parts[4], false);
+        } else {
+          openDetail({ slug }, false);
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    if (window.location.pathname !== '/') {
+      handlePopState();
+    }
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [/* executado apenas no mount para anexar os listeners */]);
+
+  /* =====================
      NAVIGATION
   ===================== */
-  const openDetail = useCallback(async (anime) => {
+  const openDetail = useCallback(async (anime, pushUrl = true) => {
     setSelectedAnime(anime);
     setView(VIEW_DETAIL);
     setLoadingDetail(true);
     setAnimeDetail(null);
+    setRelatedSeasons([]);
+
+    if (pushUrl) window.history.pushState({ view: VIEW_DETAIL, slug: anime.slug }, '', `/anime/${anime.slug}`);
 
     if (!currentUser) { setShowUserSelector(true); return; }
 
     try {
+      // 1) Detalhes do anime principal
       const res = await apiFetch(`/api/anime/${anime.slug}`);
-      if (res.ok) {
-        setAnimeDetail(await res.json());
-      } else {
+      if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        toast(errData.error || errData.message || 'Erro ao carregar detalhes do anime', 'error');
+        toast(errData.error || 'Erro ao carregar detalhes do anime', 'error');
+        return;
+      }
+      setAnimeDetail(await res.json());
+
+      // 2) Temporadas relacionadas via backend (matching inteligente no servidor)
+      const relRes = await apiFetch(`/api/anime/${anime.slug}/related`).catch(() => null);
+      if (relRes?.ok) {
+        const { seasons = [] } = await relRes.json();
+        const others = seasons.filter(s => !s.is_current);
+        if (others.length > 0) {
+          const details = await Promise.all(
+            others.map(s => apiFetch(`/api/anime/${s.slug}`).then(r => r.ok ? r.json() : null))
+          );
+          setRelatedSeasons(
+            details
+              .filter(Boolean)
+              .map((d, i) => ({ ...d, _seasonOrder: others[i].season_order }))
+          );
+        }
       }
     } catch {
       toast('Erro de rede', 'error');
@@ -275,7 +406,7 @@ export default function App() {
     openDetail({ slug, title: jikanAnime.title, cover_url: jikanAnime.cover_url });
   }, [openDetail]);
 
-  const openPlayer = useCallback(async (slug, ep) => {
+  const openPlayer = useCallback(async (slug, ep, pushUrl = true) => {
     if (!currentUser) { setShowUserSelector(true); return; }
 
     setPlayerSlug(slug);
@@ -284,8 +415,10 @@ export default function App() {
     setVideoSrc(null);
     setLoadingVideo(true);
 
+    if (pushUrl) window.history.pushState({ view: VIEW_PLAYER, slug, episode: ep }, '', `/anime/${slug}/ep/${ep}`);
+
     try {
-      const res = await apiFetch(`/api/source/${slug}/${ep}`, { headers: { 'x-user': currentUser } });
+      const res = await apiFetch(`/api/source/${slug}/${ep}`);
       if (res.ok) {
         const data = await res.json();
         if (!data.error) {
@@ -325,9 +458,17 @@ export default function App() {
   }, [currentUser, playerSlug, playerEp, animes, animeDetail]);
 
   const goBack = useCallback(() => {
-    if (view === VIEW_PLAYER) { setView(VIEW_DETAIL); setVideoSrc(null); }
-    else { setView(VIEW_HOME); setSelectedAnime(null); setAnimeDetail(null); }
-  }, [view]);
+    if (view === VIEW_PLAYER) { 
+      setView(VIEW_DETAIL); 
+      setVideoSrc(null); 
+      window.history.pushState({ view: VIEW_DETAIL, slug: playerSlug }, '', `/anime/${playerSlug}`);
+    } else { 
+      setView(VIEW_HOME); 
+      setSelectedAnime(null); 
+      setAnimeDetail(null); 
+      window.history.pushState({ view: VIEW_HOME }, '', '/');
+    }
+  }, [view, playerSlug]);
 
   /* =====================
      ADMIN — Indexar anime
@@ -541,7 +682,10 @@ export default function App() {
                 </div>
                 <div className="history-card-info">
                   <div className="history-card-title">{h.title}</div>
-                  <div className="history-card-ep">EP {h.ep}</div>
+                  <div className="history-card-ep" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>EP {h.ep}</span>
+                    <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>{formatTime(h.time)} / {formatTime(h.duration)}</span>
+                  </div>
                 </div>
               </div>
             ))}
@@ -552,6 +696,9 @@ export default function App() {
       <div className="genre-bar">
         <button className={`genre-pill${activeGenre === 'all' ? ' active' : ''}`} onClick={() => { setActiveGenre('all'); setSearchQuery(''); }} id="genre-all">
           🏠 Todos
+        </button>
+        <button className={`genre-pill${activeGenre === 'Dublado' ? ' active' : ''}`} onClick={() => { setActiveGenre('Dublado'); setSearchQuery(''); }} id="genre-dublado" style={{ borderColor: 'var(--accent)', color: activeGenre === 'Dublado' ? '#000' : 'var(--accent)' }}>
+          🇧🇷 Dublado
         </button>
         {Object.keys(genres).map(g => (
           <button key={g} className={`genre-pill${activeGenre === g ? ' active' : ''}`}
@@ -609,6 +756,10 @@ export default function App() {
       Object.entries(history).filter(([slug]) => slug === anime?.slug).flatMap(([, h]) => [String(h.ep)])
     );
     const currentEp = history[anime?.slug]?.ep;
+    const isDubbed = anime?.slug?.endsWith('-dublado');
+    const altSlug = isDubbed ? anime?.slug.replace('-dublado', '') : `${anime?.slug}-dublado`;
+    const altAnime = animes.find(a => a.slug === altSlug);
+    const episodesHistory = history[anime?.slug]?.episodes || {};
 
     return (
       <div className="main-content animate-in">
@@ -627,13 +778,21 @@ export default function App() {
                 <div className="detail-info">
                   <h1 className="detail-title">{anime.title}</h1>
 
-                  <div className="detail-badges">
-                    {anime.airing && <span className="badge badge-airing"><span className="dot" /> Em exibição</span>}
-                    {anime.lazy   && <span className="badge badge-lazy">Episódios lazy</span>}
+                   <div className="detail-meta">
+                    {anime.airing && <span className="status-badge" style={{ background: '#3b82f6', color: '#fff' }}>Em Lançamento</span>}
                     {episodes.length > 0 && (
-                      <span className="badge" style={{ background: 'rgba(255,255,255,0.1)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                      <span className="status-badge">
                         📺 {episodes.length} episódios
                       </span>
+                    )}
+                    {altAnime && (
+                      <button 
+                        className="btn-watch" 
+                        style={{ padding: '4px 12px', fontSize: '0.8rem', marginLeft: '10px', background: 'var(--accent)', color: 'var(--text)', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+                        onClick={() => openDetail(altAnime)}
+                      >
+                        {isDubbed ? '🇯🇵 Mudar para Legendado' : '🇧🇷 Mudar para Dublado'}
+                      </button>
                     )}
                   </div>
 
@@ -645,11 +804,31 @@ export default function App() {
                     </div>
                   )}
 
-                  {episodes.length > 0 && (
-                    <button className="btn-watch" onClick={() => openPlayer(anime.slug, currentEp || episodes[0])} id="btn-watch-first">
-                      ▶ {currentEp ? `Continuar EP ${currentEp}` : `Assistir EP ${episodes[0]}`}
-                    </button>
-                  )}
+                  {(() => {
+                    // Encontra o anime e episódio mais recente (em qualquer temporada)
+                    const allSeasons = [animeDetail, ...relatedSeasons].filter(Boolean);
+                    const lastWatched = allSeasons
+                      .map(s => ({ slug: s.slug, ...history[s.slug] }))
+                      .filter(h => h.ep)
+                      .sort((a, b) => (b.last_watched || 0) - (a.last_watched || 0))[0];
+                    
+                    const firstSeason = animeDetail;
+                    const firstEp = firstSeason?.episodes ? Object.keys(firstSeason.episodes).sort((a,b) => Number(a)-Number(b))[0] : null;
+                    
+                    if (!firstEp && !lastWatched) return null;
+                    
+                    return (
+                      <button className="btn-watch"
+                        onClick={() => lastWatched
+                          ? openPlayer(lastWatched.slug, lastWatched.ep)
+                          : openPlayer(animeDetail.slug, firstEp)
+                        }
+                        id="btn-watch-first"
+                      >
+                        ▶ {lastWatched ? `Continuar EP ${lastWatched.ep}` : `Assistir EP ${firstEp}`}
+                      </button>
+                    );
+                  })()}
 
                   {anime.lazy && episodes.length === 0 && (
                     <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem' }}>Carregando lista de episódios...</p>
@@ -657,25 +836,91 @@ export default function App() {
                 </div>
               </div>
 
-              {episodes.length > 0 && (
-                <section className="episodes-section">
-                  <div className="section-header">
-                    <h2 className="section-title"><span className="section-icon">📺</span>Episódios</h2>
-                  </div>
-                  <div className="episodes-grid">
-                    {episodes.map(ep => (
-                      <button
-                        key={ep}
-                        className={`ep-btn${watchedEps.has(ep) ? ' watched' : ''}${currentEp === ep ? ' current' : ''}`}
-                        onClick={() => openPlayer(anime.slug, ep)}
-                        id={`ep-btn-${ep}`}
-                      >
-                        {ep}
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
+              {/* Episódios: temporada atual + temporadas relacionadas */}
+              {(() => {
+                // Monta lista de todas as temporadas — usa _seasonOrder do backend quando disponível
+                const allSeasons = [
+                  { ...animeDetail, _seasonOrder: animeDetail?._seasonOrder ?? 1 },
+                  ...relatedSeasons
+                ].filter(Boolean);
+                const totalEps = allSeasons.reduce((n, s) => n + (s.episodes ? Object.keys(s.episodes).length : 0), 0);
+
+                if (totalEps === 0) return null;
+
+                const sortedSeasons = [...allSeasons].sort((a, b) => (a._seasonOrder ?? 1) - (b._seasonOrder ?? 1));
+                const hasMultipleSeasons = sortedSeasons.length > 1;
+
+                return (
+                  <section className="episodes-section">
+                    <div className="section-header">
+                      <h2 className="section-title"><span className="section-icon">📺</span>
+                        {hasMultipleSeasons ? `Episódios (${totalEps} no total)` : 'Episódios'}
+                      </h2>
+                    </div>
+
+                    {sortedSeasons.map((season, si) => {
+                      const sEps = season.episodes ? Object.keys(season.episodes).sort((a, b) => Number(a) - Number(b)) : [];
+                      if (sEps.length === 0) return null;
+                      const sHistory = history[season.slug]?.episodes || {};
+                      const sCurrentEp = history[season.slug]?.ep;
+
+                      return (
+                        <div key={season.slug} style={{ marginBottom: hasMultipleSeasons ? '24px' : '0' }}>
+                          {hasMultipleSeasons && (
+                            <div style={{
+                              display: 'flex', alignItems: 'center', gap: '8px',
+                              margin: '0 0 12px 0', padding: '6px 12px',
+                              background: 'rgba(255,255,255,0.04)',
+                              borderRadius: 'var(--radius-sm)',
+                              borderLeft: '3px solid var(--accent)',
+                            }}>
+                              <span style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                                {season.slug === anime?.slug ? '▶' : '◦'} {season.title}
+                              </span>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                                {sEps.length} eps
+                              </span>
+                              {season.slug !== anime?.slug && sCurrentEp && (
+                                <button
+                                  className="btn-watch"
+                                  style={{ padding: '2px 10px', fontSize: '0.75rem' }}
+                                  onClick={() => openPlayer(season.slug, sCurrentEp)}
+                                >
+                                  ▶ EP {sCurrentEp}
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          <div className="episodes-grid">
+                            {sEps.map(ep => {
+                              const epData = sHistory[ep] || {};
+                              const isFinished = epData.finished || (epData.duration && epData.time/epData.duration >= 0.9);
+                              const isPartial = !isFinished && epData.time > 0;
+
+                              let cls = 'ep-btn';
+                              if (sCurrentEp === ep) cls += ' current';
+                              else if (isFinished) cls += ' finished';
+                              else if (isPartial) cls += ' watched';
+
+                                return (
+                                  <button
+                                    key={`${season.slug}-${ep}`}
+                                    className={cls}
+                                    onClick={() => openPlayer(season.slug, ep)}
+                                    id={`ep-btn-${season.slug}-${ep}`}
+                                    aria-label={`Assistir episódio ${ep}`}
+                                  >
+                                    {ep}
+                                  </button>
+                                );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </section>
+                );
+              })()}
             </>
           ) : (
             <div className="empty-state"><div className="empty-icon">😥</div><h3>Anime não encontrado</h3></div>
@@ -716,7 +961,10 @@ export default function App() {
               <VideoPlayer src={videoSrc} type={videoType} onProgress={saveProgress} onEnded={() => nextEp && openPlayer(playerSlug, nextEp)} />
             ) : (
               <div className="player-loading">
-                <p style={{ color: '#ff4d7f' }}>❌ Não foi possível carregar o episódio</p>
+                <p style={{ color: '#ff4d7f', marginBottom: '16px' }}>❌ Não foi possível carregar o episódio</p>
+                <button className="btn btn-ghost" onClick={() => openPlayer(playerSlug, playerEp)} style={{ border: '1px solid var(--border)' }}>
+                  ↻ Tentar Novamente
+                </button>
               </div>
             )}
           </div>
@@ -737,7 +985,8 @@ export default function App() {
             <div className="player-ep-grid">
               {allEps.map(ep => (
                 <button key={ep} className={`ep-btn${String(ep) === String(playerEp) ? ' current' : ''}`}
-                  onClick={() => openPlayer(playerSlug, ep)} id={`player-ep-${ep}`}>
+                  onClick={() => openPlayer(playerSlug, ep)} id={`player-ep-${ep}`}
+                  aria-label={`Assistir episódio ${ep}`}>
                   {ep}
                 </button>
               ))}
@@ -798,9 +1047,11 @@ export default function App() {
               style={{ padding: '8px 12px', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '8px', color: 'var(--text-primary)', fontSize: '0.9rem' }}
               id="bulk-source-select"
             >
-              <option value="goyabu">Goyabu (recomendado)</option>
+              <option value="goyabu">Goyabu (Recomendado)</option>
               <option value="animefire">AnimeFire (via API)</option>
-              <option value="all">Todas as Fontes (Goyabu + AnimeFire)</option>
+              <option value="animesonline">AnimesOnline (via Sitemap)</option>
+              <option value="meusanimes">MeusAnimes (via Sitemap)</option>
+              <option value="all">Todas as Fontes (Goyabu, AF, AO, MA)</option>
             </select>
 
             <button
