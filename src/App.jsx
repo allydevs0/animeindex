@@ -155,13 +155,6 @@ export default function App() {
   /* =====================
      USERS
   ===================== */
-  const fetchUsers = useCallback(async () => {
-    try {
-      const res = await apiFetch('/api/users');
-      if (res.ok) setUsers(await res.json());
-    } catch {}
-  }, []);
-
   const loginUser = useCallback(async (username) => {
     try {
       const res = await apiFetch('/api/login', {
@@ -174,6 +167,7 @@ export default function App() {
         const user = data.user || { name: username };
         setCurrentUser(user);
         setShowUserSelector(false);
+        localStorage.setItem('animekaikai_last_user', user.name);
 
         // Aplica preferências salvas
         if (user.preferences) {
@@ -192,6 +186,27 @@ export default function App() {
       toast('Erro ao fazer login', 'error');
     }
   }, [toast]);
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      const res = await apiFetch('/api/users');
+      if (res.ok) {
+        const usersData = await res.json();
+        setUsers(usersData);
+        
+        // Auto-login se houver usuário salvo no localStorage
+        const lastUser = localStorage.getItem('animekaikai_last_user');
+        if (lastUser) {
+          // Pequeno delay para evitar loop de estado
+          setTimeout(() => loginUser(lastUser), 100);
+        } else {
+          setShowUserSelector(true);
+        }
+      }
+    } catch {}
+  }, [loginUser]);
+
+  
 
   /* Aplica o tema no <html> */
   function applyTheme(theme) {
