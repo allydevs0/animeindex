@@ -6,10 +6,17 @@ import VideoPlayer from './components/VideoPlayer.jsx';
 
 let BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 if (BACKEND_URL.endsWith('/')) BACKEND_URL = BACKEND_URL.slice(0, -1);
-const apiFetch = (url, options = {}) => fetch(BACKEND_URL + url, {
-  ...options,
-  credentials: 'include'
-});
+const apiFetch = (url, options = {}) => {
+  const user = localStorage.getItem('animekaikai_last_user');
+  const headers = { ...options.headers };
+  if (user) headers['x-user'] = user;
+  
+  return fetch(BACKEND_URL + url, {
+    ...options,
+    headers,
+    credentials: 'include'
+  });
+};
 
 /* =====================
    VIEWS
@@ -316,7 +323,7 @@ export default function App() {
     setLoadingVideo(true);
 
     try {
-      const res = await apiFetch(`/api/source/${slug}/${ep}`, { headers: { 'x-user': currentUser } });
+      const res = await apiFetch(`/api/source/${slug}/${ep}`);
       if (res.ok) {
         const data = await res.json();
         if (!data.error) {
