@@ -241,10 +241,13 @@ async function scrapeAnimeFire(url) {
   const synopsisMatch = html.match(/<div[^>]*class="[^"]*sinopse[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
   const synopsis = synopsisMatch ? decodeHtmlEntities(stripTags(synopsisMatch[1])) : '';
 
-  const genres = [];
-  const genreRegex = /href="https?:\/\/animefire\.[a-z]+\/genero\/([^"]+)"[^>]*>(.*?)<\/a>/gi;
-  let gm;
-  while ((gm = genreRegex.exec(html)) !== null) genres.push(gm[2]);
+  let genres = [];
+  const infoMatch = html.match(/class="animeInfo[^>]*>([\s\S]*?)<\/div>/i);
+  if (infoMatch) {
+    const genreRegex = /href="https?:\/\/animefire\.[a-z]+\/genero\/([^"]+)"[^>]*>(.*?)<\/a>/gi;
+    let gm;
+    while ((gm = genreRegex.exec(infoMatch[1])) !== null) genres.push(gm[2]);
+  }
 
   // Episódios — links como /animes/slug/N
   const slugMatch = url.match(/\/animes\/([^/]+)/);
