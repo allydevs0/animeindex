@@ -1089,12 +1089,18 @@ async function getVideoSource(slug, ep) {
 
   for (const prov of providers) {
     if (!epData[prov]) continue;
-    const [pageUrl, cachedUrl] = epData[prov];
+    const [pageUrl] = epData[prov];
+    let cachedUrl = epData[prov][1];
 
     // Cache hit (exceto AnimeFire — URLs expiram)
     if (cachedUrl && prov !== 'af') {
-      // Se o cache é um blogger/iframe, resolver
-      if (!cachedUrl.includes('.m3u8') && !cachedUrl.includes('.mp4')) {
+      // Se já é URL direta (m3u8/mp4/googlevideo), retornar direto
+      if (cachedUrl.includes('.m3u8') || cachedUrl.includes('.mp4') || cachedUrl.includes('googlevideo.com') || cachedUrl.includes('lightspeedst')) {
+        const type = cachedUrl.includes('.m3u8') ? 'hls' : 'direct';
+        return { type, url: cachedUrl };
+      }
+      // Se o cache é um blogger/iframe, tentar resolver
+      if (cachedUrl.includes('blogger.com') || cachedUrl.includes('.html')) {
         const direct = await resolveBloggerUrl(cachedUrl);
         if (direct) {
           anime.episodes[String(ep)][prov][1] = direct;
@@ -1102,11 +1108,12 @@ async function getVideoSource(slug, ep) {
           const type = direct.includes('.m3u8') ? 'hls' : 'direct';
           return { type, url: direct };
         }
+        // Resolve falhou — limpar cache e re-extrair
+        console.log(`[getVideoSource] Cache blogger resolve falhou para ${prov}, re-extraindo...`);
+        anime.episodes[String(ep)][prov][1] = null;
+        saveAnimeFile(slug, anime);
+        cachedUrl = null;
       }
-      const type = cachedUrl.includes('.m3u8') ? 'hls'
-                 : cachedUrl.includes('.mp4') || cachedUrl.includes('lightspeedst') ? 'direct'
-                 : 'iframe';
-      return { type, url: cachedUrl };
     }
 
     // Extração
