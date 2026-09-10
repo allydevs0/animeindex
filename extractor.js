@@ -627,35 +627,47 @@ function decryptBlogger(enc) {
  * Based on aniyomi/lib/bloggerextractor approach.
  */
 async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
-  if (!bloggerUrl) return null;
-
-  // If already a direct URL, return as-is
+  if (!bloggerUrl) { console.log('[resolveBlogger] SKIP: no url'); return null; }
   if (bloggerUrl.includes('.m3u8') || bloggerUrl.includes('.mp4')) return bloggerUrl;
 
+  const shortUrl = bloggerUrl.substring(0, 80);
+  console.log(`[resolveBlogger] START url=${shortUrl}...`);
+
   try {
-    // Step 1: Fetch the Blogger embed page to get session data
+    // Step 1: Fetch the Blogger embed page
     const res = await fetch(bloggerUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
       signal: AbortSignal.timeout(timeout),
     });
+    console.log(`[resolveBlogger] Embed page HTTP ${res.status}`);
     if (!res.ok) return null;
     const html = await res.text();
+    console.log(`[resolveBlogger] Embed page length=${html.length}`);
 
-    // Try direct stream extraction first (VIDEO_CONFIG / streams)
+    // Try direct stream extraction first
     const streamVideos = extractBloggerStreams(html);
-    if (streamVideos.length > 0) return streamVideos[0];
+    console.log(`[resolveBlogger] extractBloggerStreams found ${streamVideos.length} URLs`);
+    if (streamVideos.length > 0) {
+      console.log(`[resolveBlogger] GOT direct stream via VIDEO_CONFIG`);
+      return streamVideos[0];
+    }
 
-    // Step 2: Extract RPC session data from the page
+    // Step 2: Extract RPC session data
     const tokenMatch = bloggerUrl.match(/token=([^&"]+)/);
-    if (!tokenMatch) return null;
+    if (!tokenMatch) { console.log('[resolveBlogger] SKIP: no token in URL'); return null; }
     const token = tokenMatch[1];
+    console.log(`[resolveBlogger] token=${token.substring(0, 20)}...`);
 
     const formSessionId = html.match(/FdrFJe":"([^"]+)"/)?.[1] || '';
     const blogId = html.match(/cfb2h":"([^"]+)"/)?.[1] || '';
     const requestId = String(Math.floor(Date.now() / 1000) % 86400);
 
+    console.log(`[resolveBlogger] f.sid=${formSessionId ? formSessionId.substring(0, 20) + '...' : 'MISSING'}, blogId=${blogId ? blogId.substring(0, 20) + '...' : 'MISSING'}`);
+
     if (!formSessionId || !blogId) {
-      console.warn('[resolveBlogger] Missing session data (f.sid or blogId)');
+      // Log a snippet of HTML to debug
+      const snippet = html.substring(0, 500);
+      console.warn(`[resolveBlogger] Missing session data. HTML snippet: ${snippet}`);
       return null;
     }
 
@@ -671,6 +683,7 @@ async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
 
     const rpcBody = `f.req=%5B%5B%5B%22WcwnYd%22%2C%22%5B%5C%22${token}%5C%22%2C%5C%22%5C%22%2C0%5D%22%2Cnull%2C%22generic%22%5D%5D%5D`;
 
+    console.log(`[resolveBlogger] Calling RPC...`);
     const rpcRes = await fetch(rpcUrl, {
       method: 'POST',
       headers: {
@@ -684,42 +697,45 @@ async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
       signal: AbortSignal.timeout(timeout),
     });
 
-    if (!rpcRes.ok) {
-      console.warn(`[resolveBlogger] RPC failed: HTTP ${rpcRes.status}`);
-      return null;
-    }
+    console.log(`[resolveBlogger] RPC HTTP ${rpcRes.status}`);
+    if (!rpcRes.ok) return null;
 
     const rpcText = await rpcRes.text();
+    console.log(`[resolveBlogger] RPC response length=${rpcText.length}`);
 
-    // Step 4: Extract video URLs from RPC response
-    // Raw format: \"https://rr1---...googlevideo.com/videoplayback?expire\\u003d...\\u0026...\"
+    // Step 4: Extract video URLs
     const urlPattern = /\\"(https:\/\/rr1[^"]+)\\"/g;
     let match;
     const allUrls = [];
     while ((match = urlPattern.exec(rpcText)) !== null) {
-      // Decode double-escaped \\u sequences
       let url = match[1]
         .replace(/\\\\u002f/g, '/')
         .replace(/\\\\u003d/g, '=')
         .replace(/\\\\u0026/g, '&')
         .replace(/\\\\u003c/g, '<')
         .replace(/\\\\u003e/g, '>');
-      // Second pass: decode single \u sequences
       url = url.replace(/\\u002f/g, '/').replace(/\\u003d/g, '=').replace(/\\u0026/g, '&');
       allUrls.push(url);
     }
 
+    console.log(`[resolveBlogger] Found ${allUrls.length} googlevideo URLs in RPC`);
     const directUrls = allUrls.filter(u =>
       u.includes('googlevideo.com') || u.includes('.mp4') || u.includes('videoplayback')
     );
+    console.log(`[resolveBlogger] After filter: ${directUrls.length} direct URLs`);
 
     if (directUrls.length > 0) {
+      console.log(`[resolveBlogger] SUCCESS: ${directUrls[0].substring(0, 80)}...`);
       return directUrls[0];
     }
 
+    // Log RPC response snippet for debugging
+    console.log(`[resolveBlogger] RPC response snippet: ${rpcText.substring(0, 300)}`);
+
   } catch (err) {
-    console.warn(`[resolveBlogger] Falhou:`, err.message);
+    console.warn(`[resolveBlogger] ERROR:`, err.message);
   }
+  console.log('[resolveBlogger] FALLBACK: returning null');
   return null;
 }
 
