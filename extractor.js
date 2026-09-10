@@ -623,8 +623,8 @@ function decryptBlogger(enc) {
 }
 
 /**
- * Resolve Blogger embed URL → direct video stream URL.
- * Fetches the Blogger embed page and extracts the actual .mp4/.m3u8 URL.
+ * Resolve Blogger embed URL → direct video stream URLs using RPC batchexecute.
+ * Based on aniyomi/lib/bloggerextractor approach.
  */
 async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
   if (!bloggerUrl) return null;
@@ -633,6 +633,7 @@ async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
   if (bloggerUrl.includes('.m3u8') || bloggerUrl.includes('.mp4')) return bloggerUrl;
 
   try {
+    // Step 1: Fetch the Blogger embed page to get session data
     const res = await fetch(bloggerUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
       signal: AbortSignal.timeout(timeout),
@@ -640,54 +641,104 @@ async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
     if (!res.ok) return null;
     const html = await res.text();
 
-    // Try common patterns for Blogger video URLs
-    const patterns = [
-      /https?:\/\/[^"'\s<>]+\.mp4[^"'\s<>]*/gi,
-      /https?:\/\/[^"'\s<>]+\.m3u8[^"'\s<>]*/gi,
-      /https?:\/\/[^"'\s<>]*googlevideo\.com[^"'\s<>]+/gi,
-      /https?:\/\/[^"'\s<>]*\.blogspot\.com\/[^"'\s<>]+/gi,
-      /"playbackUrl"\s*:\s*"(https?:\\\/\\\/[^"]+)"/i,
-      /"url"\s*:\s*"(https?:\\\/\\\/[^"]+)"/i,
-      /src="(https?:\/\/[^"]+\.mp4[^"]*)"/i,
-      /src="(https?:\/\/[^"]+\.m3u8[^"]*)"/i,
-    ];
+    // Try direct stream extraction first (VIDEO_CONFIG / streams)
+    const streamVideos = extractBloggerStreams(html);
+    if (streamVideos.length > 0) return streamVideos[0];
 
-    for (const pattern of patterns) {
-      const match = html.match(pattern);
-      if (match) {
-        let url = match[0];
-        // Clean up JSON-escaped URLs
-        url = url.replace(/\\\//g, '/').replace(/^["']|["']$/g, '');
-        if (url.includes('.m3u8') || url.includes('.mp4') || url.includes('googlevideo.com')) {
-          return url;
-        }
-      }
+    // Step 2: Extract RPC session data from the page
+    const tokenMatch = bloggerUrl.match(/token=([^&"]+)/);
+    if (!tokenMatch) return null;
+    const token = tokenMatch[1];
+
+    const formSessionId = html.match(/FdrFJe":"([^"]+)"/)?.[1] || '';
+    const blogId = html.match(/cfb2h":"([^"]+)"/)?.[1] || '';
+    const requestId = String(Math.floor(Date.now() / 1000) % 86400);
+
+    if (!formSessionId || !blogId) {
+      console.warn('[resolveBlogger] Missing session data (f.sid or blogId)');
+      return null;
     }
 
-    // Try to find in video tags
-    const videoMatch = html.match(/<video[^>]+src="([^"]+)"/i);
-    if (videoMatch) return videoMatch[1];
+    // Step 3: Call batchexecute RPC
+    const rpcUrl = `https://www.blogger.com/_/BloggerVideoPlayerUi/data/batchexecute`
+      + `?rpcids=WcwnYd`
+      + `&source-path=/video.g`
+      + `&f.sid=${encodeURIComponent(formSessionId)}`
+      + `&bl=${encodeURIComponent(blogId)}`
+      + `&hl=en-US`
+      + `&_reqid=${requestId}`
+      + `&rt=c`;
 
-    const sourceMatch = html.match(/<source[^>]+src="([^"]+)"/i);
-    if (sourceMatch) return sourceMatch[1];
+    const rpcBody = `f.req=%5B%5B%5B%22WcwnYd%22%2C%22%5B%5C%22${token}%5C%22%2C%5C%22%5C%22%2C0%5D%22%2Cnull%2C%22generic%22%5D%5D%5D`;
 
-    // Try to find in JavaScript variables
-    const jsPatterns = [
-      /(?:file|src|source|video_url|stream_url)\s*[=:]\s*["']?(https?:\/\/[^"'\s<>]+)/gi,
-    ];
-    for (const p of jsPatterns) {
-      const m = html.match(p);
-      if (m) {
-        const url = m[0].split(/[=:]/)[1].trim().replace(/^["']|["']$/g, '');
-        if (url.includes('.m3u8') || url.includes('.mp4') || url.includes('googlevideo.com')) {
-          return url;
-        }
-      }
+    const rpcRes = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: {
+        'accept': '*/*',
+        'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'x-same-domain': '1',
+        'Referer': 'https://www.blogger.com/',
+      },
+      body: rpcBody,
+      signal: AbortSignal.timeout(timeout),
+    });
+
+    if (!rpcRes.ok) {
+      console.warn(`[resolveBlogger] RPC failed: HTTP ${rpcRes.status}`);
+      return null;
     }
+
+    const rpcText = await rpcRes.text();
+
+    // Step 4: Extract video URLs from RPC response
+    // Raw format: \"https://rr1---...googlevideo.com/videoplayback?expire\\u003d...\\u0026...\"
+    const urlPattern = /\\"(https:\/\/rr1[^"]+)\\"/g;
+    let match;
+    const allUrls = [];
+    while ((match = urlPattern.exec(rpcText)) !== null) {
+      // Decode double-escaped \\u sequences
+      let url = match[1]
+        .replace(/\\\\u002f/g, '/')
+        .replace(/\\\\u003d/g, '=')
+        .replace(/\\\\u0026/g, '&')
+        .replace(/\\\\u003c/g, '<')
+        .replace(/\\\\u003e/g, '>');
+      // Second pass: decode single \u sequences
+      url = url.replace(/\\u002f/g, '/').replace(/\\u003d/g, '=').replace(/\\u0026/g, '&');
+      allUrls.push(url);
+    }
+
+    const directUrls = allUrls.filter(u =>
+      u.includes('googlevideo.com') || u.includes('.mp4') || u.includes('videoplayback')
+    );
+
+    if (directUrls.length > 0) {
+      return directUrls[0];
+    }
+
   } catch (err) {
     console.warn(`[resolveBlogger] Falhou:`, err.message);
   }
   return null;
+}
+
+/** Extract streams from VIDEO_CONFIG in the page (old method) */
+function extractBloggerStreams(html) {
+  if (!html || html.includes('errorContainer')) return [];
+
+  const streamsMatch = html.match(/"streams":\[((?:[^[\]]|\[(?:[^[\]]|\[[^[\]]*\])*\])*)\]/);
+  if (!streamsMatch) return [];
+
+  const results = [];
+  const entries = streamsMatch[1].split('},');
+  for (const entry of entries) {
+    const urlMatch = entry.match(/"play_url":"([^"]+)"/);
+    if (urlMatch) {
+      results.push(urlMatch[1]);
+    }
+  }
+  return results;
 }
 
 function escapeRegExp(str) {
