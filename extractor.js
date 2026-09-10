@@ -805,49 +805,6 @@ function _extractAllBloggerUrls(rpcText) {
   return urls;
 }
 
-/** Categorize URLs by quality: HD = highest itag, SD = medium itag */
-function _categorizeQuality(urls) {
-  let hd = null;
-  let sd = null;
-
-  // itag quality ranking (higher = better)
-  const itagQuality = {
-    18: 0, 22: 1, 43: 1, 59: 2, 78: 1,
-    133: 0, 134: 1, 135: 2, 136: 3, 137: 4,
-    160: 0, 242: 0, 243: 1, 244: 2, 247: 3, 248: 4,
-    271: 5, 278: 6, 302: 3, 303: 4, 308: 5, 313: 6, 315: 6,
-  };
-
-  for (const url of urls) {
-    const itagMatch = url.match(/[&?]itag=(\d+)/);
-    if (itagMatch) {
-      const itag = parseInt(itagMatch[1]);
-      const quality = itagQuality[itag] ?? 0;
-      if (!hd || quality > itagQuality[parseInt(hd.match(/[&?]itag=(\d+)/)?.[1] || '0') ?? 0]) {
-        if (quality >= 3) hd = url;
-        else if (!sd || quality > itagQuality[parseInt(sd.match(/[&?]itag=(\d+)/)?.[1] || '0') ?? 0]) sd = url;
-      } else if (!sd) {
-        sd = url;
-      }
-    } else {
-      // No itag - assume highest quality if no HD yet
-      if (!hd) hd = url;
-      else if (!sd) sd = url;
-    }
-  }
-
-  // If no HD, promote SD to HD
-  if (!hd && sd) { hd = sd; sd = null; }
-  // If HD but no SD, pick a lower quality from the list
-  if (hd && !sd && urls.length > 1) {
-    for (const url of urls) {
-      if (url !== hd) { sd = url; break; }
-    }
-  }
-
-  return { hd, sd };
-}
-
 /** Extract streams from VIDEO_CONFIG in the page (old method) */
 function extractBloggerStreams(html) {
   if (!html || html.includes('errorContainer')) return [];
@@ -1238,14 +1195,33 @@ async function getVideoSource(slug, ep) {
   for (const prov of providers) {
     if (!epData[prov]) continue;
     const [pageUrl] = epData[prov];
-    let cachedUrl = epData[prov][1];
+    const rawCache = epData[prov][1];
+
+    // O cache pode estar em dois formatos:
+    //  - novo:   objeto { hd, sd } -> preserva as duas qualidades
+    //  - legado: string única      -> formato antigo, antes desta correção
+    // Antes, só a URL "vencedora" (hd || sd) era cacheada, então a
+    // qualidade descartada se perdia para sempre a partir da 2ª chamada,
+    // e o cache-hit nem devolvia hd/sd pro cliente (só `url`).
+    let cachedHd = null;
+    let cachedSd = null;
+    let cachedUrl = null;
+
+    if (rawCache && typeof rawCache === 'object') {
+      cachedHd = rawCache.hd || null;
+      cachedSd = rawCache.sd || null;
+      cachedUrl = cachedHd || cachedSd || null;
+    } else if (typeof rawCache === 'string' && rawCache) {
+      cachedUrl = rawCache;
+    }
 
 // Cache hit (exceto AnimeFire — URLs expiram)
      if (cachedUrl && prov !== 'af') {
        // Se já é URL direta (m3u8/mp4/googlevideo), retornar direto
        if (cachedUrl.includes('.m3u8') || cachedUrl.includes('.mp4') || cachedUrl.includes('googlevideo.com') || cachedUrl.includes('lightspeedst')) {
          const type = cachedUrl.includes('.m3u8') ? 'hls' : 'direct';
-         return { type, url: cachedUrl };
+         // Agora sempre devolve hd/sd quando o cache já os tiver
+         return { type, url: cachedUrl, hd: cachedHd, sd: cachedSd };
        }
        // Se o cache é um blogger/iframe, tentar resolver
        if (cachedUrl.includes('blogger.com') || cachedUrl.includes('.html')) {
@@ -1254,16 +1230,16 @@ async function getVideoSource(slug, ep) {
            let resolvedUrl;
            if (typeof resolved === 'string') {
              resolvedUrl = resolved;
-             anime.episodes[String(ep)][prov][1] = resolvedUrl;
+             anime.episodes[String(ep)][prov][1] = { hd: resolvedUrl, sd: null };
              saveAnimeFile(slug, anime);
              const type = resolvedUrl.includes('.m3u8') ? 'hls' : 'direct';
-             return { type, url: resolvedUrl };
+             return { type, url: resolvedUrl, hd: resolvedUrl, sd: null };
            } else {
              const { hd, sd } = resolved;
              const directUrl = hd || sd;
              if (directUrl) {
-               const cacheVal = directUrl;
-               anime.episodes[String(ep)][prov][1] = cacheVal;
+               // Guarda as DUAS qualidades no cache, não só a escolhida
+               anime.episodes[String(ep)][prov][1] = { hd, sd };
                saveAnimeFile(slug, anime);
                const type = directUrl.includes('.m3u8') ? 'hls' : 'direct';
                return { type, url: directUrl, hd, sd };
@@ -1274,7 +1250,6 @@ async function getVideoSource(slug, ep) {
          console.log(`[getVideoSource] Cache blogger resolve falhou para ${prov}, re-extraindo...`);
          anime.episodes[String(ep)][prov][1] = null;
          saveAnimeFile(slug, anime);
-         cachedUrl = null;
        }
      }
 
@@ -1294,7 +1269,7 @@ async function getVideoSource(slug, ep) {
            if (resolved) {
              if (typeof resolved === 'string') {
                const directUrl = resolved;
-               result = { type: directUrl.includes('.m3u8') ? 'hls' : 'direct', url: directUrl };
+               result = { type: directUrl.includes('.m3u8') ? 'hls' : 'direct', url: directUrl, hd: directUrl, sd: null };
              } else {
                const { hd, sd } = resolved;
                const directUrl = hd || sd;
@@ -1304,9 +1279,11 @@ async function getVideoSource(slug, ep) {
              }
            }
          }
-         // Cachear URL para proximos requests
+         // Cachear as DUAS qualidades (hd e sd), não só a URL escolhida
          if (prov !== 'af') {
-           const cacheVal = result.url || (result.hd || result.sd || null);
+           const cacheVal = (result.hd || result.sd)
+             ? { hd: result.hd || null, sd: result.sd || null }
+             : (result.url ? { hd: result.url, sd: null } : null);
            anime.episodes[String(ep)][prov][1] = cacheVal;
            saveAnimeFile(slug, anime);
          }
