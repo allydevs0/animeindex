@@ -681,14 +681,19 @@ async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
       + `&_reqid=${requestId}`
       + `&rt=c`;
 
-    const rpcBody = `f.req=%5B%5B%5B%22WcwnYd%22%2C%22%5B%5C%22${token}%5C%22%2C%5C%22%5C%22%2C0%5D%22%2Cnull%2C%22generic%22%5D%5D%5D`;
+    const rpcBody = `f.req=%5B%5B%5B%22WcwnYd%22%2C%22%5B%5C%22${token}%5C%22%2C%5C%22%5C%22%2C0%5D%22%2Cnull%2C%22generic%22%5D%5D%5D&`;
 
     console.log(`[resolveBlogger] Calling RPC...`);
     const rpcRes = await fetch(rpcUrl, {
       method: 'POST',
       headers: {
         'accept': '*/*',
+        'accept-language': 'en-US,en;q=0.9',
         'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'priority': 'u=1, i',
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'x-same-domain': '1',
         'Referer': 'https://www.blogger.com/',
@@ -703,30 +708,65 @@ async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
     const rpcText = await rpcRes.text();
     console.log(`[resolveBlogger] RPC response length=${rpcText.length}`);
 
-    // Step 4: Extract video URLs
-    const urlPattern = /\\"(https:\/\/rr1[^"]+)\\"/g;
-    let match;
-    const allUrls = [];
-    while ((match = urlPattern.exec(rpcText)) !== null) {
-      let url = match[1]
-        .replace(/\\\\u002f/g, '/')
-        .replace(/\\\\u003d/g, '=')
-        .replace(/\\\\u0026/g, '&')
-        .replace(/\\\\u003c/g, '<')
-        .replace(/\\\\u003e/g, '>');
-      url = url.replace(/\\u002f/g, '/').replace(/\\u003d/g, '=').replace(/\\u0026/g, '&');
-      allUrls.push(url);
+    // Step 4: Extract video URLs from RPC response
+    // Based on Kotlin BloggerExtractor: rpcString.substringAfter("[[\\\"", "").substringBefore("]]]")
+    // Then split by "],[" and extract URL after \\"
+    let extracted = null;
+    try {
+      const afterStart = rpcText.substringAfter('[[\\"');
+      if (afterStart) {
+        const beforeEnd = afterStart.substringBefore(']]]');
+        if (beforeEnd) {
+          // Split by "],[" and extract URL from each segment
+          const segments = beforeEnd.split('],[');
+          for (const seg of segments) {
+            const urlMatch = seg.match(/\\\\"([^"]+)\\\\"/);
+            if (urlMatch) {
+              let url = urlMatch[1];
+              // Decode double-escaped \\u sequences
+              url = url.replace(/\\\\u002f/g, '/').replace(/\\\\u003d/g, '=').replace(/\\\\u0026/g, '&');
+              // Second pass: decode single \u sequences
+              url = url.replace(/\\u002f/g, '/').replace(/\\u003d/g, '=').replace(/\\u0026/g, '&');
+              if (url.includes('googlevideo.com') || url.includes('.mp4') || url.includes('videoplayback')) {
+                extracted = url;
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`[resolveBlogger] Extraction error:`, e.message);
     }
 
-    console.log(`[resolveBlogger] Found ${allUrls.length} googlevideo URLs in RPC`);
-    const directUrls = allUrls.filter(u =>
-      u.includes('googlevideo.com') || u.includes('.mp4') || u.includes('videoplayback')
-    );
-    console.log(`[resolveBlogger] After filter: ${directUrls.length} direct URLs`);
+    // Fallback: try regex pattern
+    if (!extracted) {
+      const urlPattern = /\\"(https:\/\/[^"]+)\\"/g;
+      let match;
+      const allUrls = [];
+      while ((match = urlPattern.exec(rpcText)) !== null) {
+        let url = match[1]
+          .replace(/\\\\u002f/g, '/')
+          .replace(/\\\\u003d/g, '=')
+          .replace(/\\\\u0026/g, '&')
+          .replace(/\\\\u003c/g, '<')
+          .replace(/\\\\u003e/g, '>');
+        url = url.replace(/\\u002f/g, '/').replace(/\\u003d/g, '=').replace(/\\u0026/g, '&');
+        allUrls.push(url);
+      }
 
-    if (directUrls.length > 0) {
-      console.log(`[resolveBlogger] SUCCESS: ${directUrls[0].substring(0, 80)}...`);
-      return directUrls[0];
+      const directUrls = allUrls.filter(u =>
+        u.includes('googlevideo.com') || u.includes('.mp4') || u.includes('videoplayback')
+      );
+
+      if (directUrls.length > 0) {
+        extracted = directUrls[0];
+      }
+    }
+
+    if (extracted) {
+      console.log(`[resolveBlogger] SUCCESS: ${extracted.substring(0, 80)}...`);
+      return extracted;
     }
 
     // Log RPC response snippet for debugging
