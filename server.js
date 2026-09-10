@@ -244,6 +244,17 @@ const server = http.createServer(async (req, res) => {
     return respond(res, 200, { ok: true, time: new Date().toISOString() });
   }
 
+  // ─── GET /api/version ─────────────────────────────────────────────
+  if (segment === 'version' && method === 'GET') {
+    return respond(res, 200, {
+      version: '2.1.0',
+      codename: 'BloggerRPC',
+      deploy: 'backend branch → main',
+      features: ['blogger-rpc-resolve', 're-extract-on-stale-cache'],
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   // ─── GET /api/users ────────────────────────────────────────────────
   if (segment === 'users' && method === 'GET') {
     const users = loadUsers();
