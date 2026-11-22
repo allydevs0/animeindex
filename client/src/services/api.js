@@ -309,7 +309,7 @@ export const AnimeApi = {
   async getVideoSource(anime, episodeNumber = 1) {
     const slug = anime.slug || String(anime.id || anime.mal_id);
 
-    // Chama o endpoint oficial de extração de vídeo do backend!
+    // Chama o endpoint oficial de extração de vídeo do backend
     try {
       const data = await backendFetch(`/api/source/${slug}/${episodeNumber}`);
       if (data && (data.url || data.videoSrc)) {
@@ -318,30 +318,20 @@ export const AnimeApi = {
         return {
           type: isHls ? 'hls' : (data.type || 'direct'),
           url: streamUrl,
-          server: 'Backend Extractor',
+          hd: data.hd || streamUrl,
+          sd: data.sd || null,
+          server: data.server || 'AnimeIndex Player',
         };
       }
+      if (data && data.error) {
+        throw new Error(data.error);
+      }
     } catch (err) {
-      console.warn(`[AnimeApi] Extração no backend para ${slug}/${episodeNumber} falhou (status ${err.status}):`, err.message);
+      console.warn(`[AnimeApi] Extração no backend para ${slug}/${episodeNumber} falhou:`, err.message);
+      throw err;
     }
 
-    // Se o anime possui trailer embutido, usa como player alternativo enquanto o banco restaura
-    if (anime.trailer?.embed_url) {
-      return {
-        type: 'iframe',
-        url: anime.trailer.embed_url + '?autoplay=1',
-        server: 'Trailer Preview',
-        isTrailer: true,
-      };
-    }
-
-    // Stream de demonstração seguro caso a fonte do episódio ainda não tenha sido re-extraída
-    return {
-      type: 'hls',
-      url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-      server: 'Stream Demo',
-      isDemo: true,
-    };
+    throw new Error(`Nenhuma fonte de vídeo encontrada para o episódio ${episodeNumber}`);
   },
 
   /**

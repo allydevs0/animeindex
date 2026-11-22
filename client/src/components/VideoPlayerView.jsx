@@ -48,7 +48,7 @@ export default function VideoPlayerView({
       } catch (err) {
         if (isCancelled) return;
         console.error('[Player] Erro ao carregar stream:', err);
-        setError('Não foi possível carregar o vídeo para este episódio.');
+        setError(err.message || 'Não foi possível carregar o vídeo para este episódio.');
       } finally {
         if (!isCancelled) setLoading(false);
       }
