@@ -1415,6 +1415,125 @@ async function resolveAnimeOnDemand(slug) {
 }
 
 /* ==========================================
+   RESOLVE MISSING EPISODE (On-Demand Episode Finder & Auto-Save)
+========================================== */
+async function resolveMissingEpisode(slug, ep, anime) {
+  console.log(`[resolveMissingEpisode] Episódio ${ep} ausente para "${slug}". Buscando na web...`);
+  const index = loadIndex();
+  const entry = index.animes[slug] || {};
+  const epKey = String(ep);
+
+  // 1. Tentar re-sincronizar a source_url existente para ver se saíram novos episódios
+  const currentSource = anime.source_url || entry.source_url || entry.lazyUrl;
+  if (currentSource) {
+    try {
+      console.log(`[resolveMissingEpisode] Re-sincronizando fonte atual: ${currentSource}`);
+      const fresh = await addAnimeToDb(currentSource);
+      if (fresh?.episodes?.[epKey]) {
+        console.log(`[resolveMissingEpisode] Episódio ${ep} encontrado ao atualizar ${currentSource}!`);
+        const updatedAnime = loadAnimeFile(slug) || fresh;
+        const resVal = updatedAnime?.episodes?.[epKey] || fresh.episodes[epKey];
+        console.log(`[resolveMissingEpisode] resVal =`, resVal);
+        return resVal;
+      }
+    } catch (e) {
+      console.warn(`[resolveMissingEpisode] Re-sync da fonte falhou: ${e.message}`);
+    }
+  }
+
+  // 2. Extrair variações de slug para buscar em outros provedores
+  const rawTitle = anime.title || entry.title || slug;
+  const cleanTitle = rawTitle
+    .replace(/\s*[–-]?\s*(?:temporada|season|filme|movie|[0-9]+[ªº]?\s*temp|dublado|legendado)\s*.*$/gi, '')
+    .replace(/\s+[0-9]+$/g, '')
+    .trim();
+
+  const titleSlug = slugify(cleanTitle);
+  const candidateSlugs = [...new Set([
+    slug,
+    titleSlug,
+    slug.replace(/-[0-9]+$/, ''),
+    slug.replace(/-dublado$/, ''),
+    slugify(rawTitle),
+  ])].filter(Boolean);
+
+  // 3. Tentar raspar o anime completo nos provedores alternativos
+  for (const s of candidateSlugs) {
+    const urls = [
+      `https://animesonlinecc.to/anime/${s}/`,
+      `https://animefire.plus/animes/${s}-todos-os-episodios`,
+      `https://meusanimes.blog/anime/${s}/`,
+    ];
+
+    for (const u of urls) {
+      if (u === currentSource) continue;
+      try {
+        console.log(`[resolveMissingEpisode] Verificando novos episódios em: ${u}`);
+        const fresh = await addAnimeToDb(u);
+        const epData = fresh?.episodes?.[epKey];
+        if (epData) {
+          console.log(`[resolveMissingEpisode] SUCESSO! Episódio ${ep} encontrado em ${u}`);
+          // Mescla com o anime existente
+          anime.episodes = { ...(anime.episodes || {}), ...(fresh.episodes || {}) };
+          anime.episodes_count = Object.keys(anime.episodes).length;
+          saveAnimeFile(slug, anime);
+
+          const idx = loadIndex();
+          if (idx.animes[slug]) {
+            idx.animes[slug].episodes_count = anime.episodes_count;
+            saveIndex(idx);
+          }
+          return epData;
+        }
+      } catch (_) {}
+    }
+  }
+
+  // 4. Tentar URLs diretas de episódio por padrão de URL
+  const epPad = epKey.padStart(2, '0'); // ex: "01", "08"
+  for (const s of candidateSlugs) {
+    const directEpisodeCandidates = [
+      { prov: 'ao', url: `https://animesonlinecc.to/episodio/${s}-episodio-${epKey}/` },
+      { prov: 'ao', url: `https://animesonlinecc.to/episodio/${s}-episodio-${epPad}/` },
+      { prov: 'af', url: `https://animefire.plus/video/${s}/${epKey}` },
+      { prov: 'ma', url: `https://meusanimes.blog/e/${s}-episodio-${epKey}/` },
+      { prov: 'ma', url: `https://meusanimes.blog/e/${s}-episodio-${epPad}/` },
+    ];
+
+    for (const item of directEpisodeCandidates) {
+      try {
+        const html = await fetchHtml(item.url, { timeout: 8000 });
+        if (html && !html.includes('<title>Just a moment...</title>') && !html.includes('404')) {
+          // Verifica se a página realmente contém vídeo/iframe
+          const hasVideo = html.includes('blogger.com') || html.includes('.m3u8') || html.includes('.mp4') || html.includes('player');
+          if (hasVideo) {
+            console.log(`[resolveMissingEpisode] SUCESSO via URL direta! Provedor ${item.prov}: ${item.url}`);
+            if (!anime.episodes) anime.episodes = {};
+            if (!anime.episodes[epKey]) anime.episodes[epKey] = {};
+            anime.episodes[epKey][item.prov] = [item.url, null];
+            anime.episodes_count = Object.keys(anime.episodes).length;
+
+            // Salva para as próximas vezes já ter o episódio gravado!
+            saveAnimeFile(slug, anime);
+
+            const idx = loadIndex();
+            if (idx.animes[slug]) {
+              idx.animes[slug].episodes_count = anime.episodes_count;
+              saveIndex(idx);
+            }
+
+            return anime.episodes[epKey];
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  console.warn(`[resolveMissingEpisode] Não foi possível encontrar o episódio ${ep} de "${slug}".`);
+  return null;
+}
+
+/* ==========================================
    GET VIDEO SOURCE
 ========================================== */
 async function getVideoSource(slug, ep) {
@@ -1432,6 +1551,17 @@ async function getVideoSource(slug, ep) {
     const altKey = Object.keys(anime.episodes || {}).find(k => String(parseInt(k, 10)) === num);
     if (altKey) epData = anime.episodes[altKey];
   }
+
+  // Se o episódio não estava no cache, vai atrás na web e salva para as próximas vezes!
+  if (!epData) {
+    epData = await resolveMissingEpisode(slug, ep, anime);
+    if (epData) {
+      anime = loadAnimeFile(slug) || anime;
+      if (!anime.episodes) anime.episodes = {};
+      if (!anime.episodes[String(ep)]) anime.episodes[String(ep)] = epData;
+    }
+  }
+
   if (!epData) throw new Error(`Episódio ${ep} não encontrado para ${slug}`);
 
   const ORDER = ['af', 'gy', 'ao', 'ad', 'ma'];
@@ -1759,6 +1889,7 @@ export {
   addAnimeToDb,
   getVideoSource,
   resolveAnimeOnDemand,
+  resolveMissingEpisode,
   syncAiringAnimes,
   fetchLatestReleases,
   // Bulk import
