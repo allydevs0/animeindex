@@ -1,1 +1,15 @@
-".env" 
+# Dependências
+node_modules/
+client/node_modules/
+dist/
+client/dist/
+
+# Ambiente e Logs
+.env
+.env.local
+*.log
+npm-debug.log*
+
+# SO
+.DS_Store
+Thumbs.db

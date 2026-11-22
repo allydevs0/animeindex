@@ -128,11 +128,18 @@ function createSession(username) {
 /* ==========================================
    HELPERS
 ========================================== */
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) return true;
+  if (origin.endsWith('.vercel.app')) return true;
+  if (origin.includes('onrender.com')) return true;
+  return ['https://animeindex-six.vercel.app', 'http://localhost:5173', 'http://localhost:4173', 'https://animeindex-28ua.onrender.com'].includes(origin);
+}
+
 function respond(res, status, data, contentType = 'application/json') {
   const body = contentType === 'application/json' ? JSON.stringify(data) : data;
   const origin = res.req?.headers?.origin;
-  const allowed = ['https://animeindex-six.vercel.app', 'http://localhost:5173', 'http://localhost:4173', 'https://animeindex-28ua.onrender.com'];
-  const allowOrigin = (origin && allowed.includes(origin)) ? origin : allowed[0];
+  const allowOrigin = (origin && isOriginAllowed(origin)) ? origin : (origin || '*');
   
   res.writeHead(status, {
     'Content-Type': contentType,
@@ -204,8 +211,7 @@ const server = http.createServer(async (req, res) => {
 
   if (method === 'OPTIONS') {
     const origin = req.headers.origin;
-    const allowed = ['https://animeindex-six.vercel.app', 'http://localhost:5173', 'http://localhost:4173', 'https://animeindex-28ua.onrender.com'];
-    const allowOrigin = (origin && allowed.includes(origin)) ? origin : allowed[0];
+    const allowOrigin = (origin && isOriginAllowed(origin)) ? origin : (origin || '*');
     
     res.writeHead(204, {
       'Access-Control-Allow-Origin':  allowOrigin,
@@ -228,8 +234,7 @@ const server = http.createServer(async (req, res) => {
 
   // Security: Block unauthorized origins
   const origin = req.headers.origin;
-  const allowedOrigins = ['https://animeindex-six.vercel.app', 'http://localhost:5173', 'http://localhost:4173', 'https://animeindex-28ua.onrender.com'];
-  if (origin && !allowedOrigins.includes(origin)) {
+  if (origin && !isOriginAllowed(origin)) {
     return respond(res, 403, { error: 'Forbidden: Origin not allowed' });
   }
 

@@ -130,9 +130,10 @@ function appendSessionLog(entry) {
    FETCH / REQUEST HELPERS
 ========================================== */
 const DEFAULT_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+  'Accept': 'application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
   'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8',
+  'Referer': 'https://goyabu.io/',
 };
 
 async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
@@ -170,10 +171,39 @@ async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
   }
 }
 
-async function fetchJson(url, opts = {}) {
-  const res = await fetch(url, { headers: DEFAULT_HEADERS, signal: AbortSignal.timeout(15000), ...opts });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+async function fetchJson(url, { timeout = 15000, direct = false, ...opts } = {}) {
+  const targetUrl = direct ? url : PROXY_URL + encodeURIComponent(url);
+  try {
+    const res = await fetch(targetUrl, {
+      headers: { ...DEFAULT_HEADERS, ...(opts.headers || {}) },
+      signal: AbortSignal.timeout(timeout),
+      ...opts,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    if (!direct) {
+      // Fallback 1: AllOrigins proxy
+      try {
+        const resOrigin = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {
+          headers: DEFAULT_HEADERS,
+          signal: AbortSignal.timeout(timeout),
+        });
+        if (resOrigin.ok) return await resOrigin.json();
+      } catch (_) {}
+
+      // Fallback 2: Tenta direto
+      try {
+        const resDirect = await fetch(url, {
+          headers: { ...DEFAULT_HEADERS, ...(opts.headers || {}) },
+          signal: AbortSignal.timeout(10000),
+          ...opts,
+        });
+        if (resDirect.ok) return await resDirect.json();
+      } catch (_) {}
+    }
+    throw err;
+  }
 }
 
 function slugify(str) {
