@@ -145,11 +145,26 @@ function appendSessionLog(entry) {
 /* ==========================================
    FETCH / REQUEST HELPERS
 ========================================== */
+function getRequestHeaders(targetUrl) {
+  let origin = 'https://animesonlinecc.to';
+  try {
+    const parsed = new URL(targetUrl);
+    origin = `${parsed.protocol}//${parsed.host}`;
+  } catch (_) {}
+
+  return {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8',
+    'Origin': origin,
+    'Referer': `${origin}/`,
+  };
+}
+
 const DEFAULT_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
   'Accept': 'application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
   'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8',
-  'Referer': 'https://goyabu.io/',
 };
 
 const CF_RESOLVER_URL = process.env.CLOUDFLARE_RESOLVER_URL || process.env.FLARESOLVERR_URL || null;
@@ -177,10 +192,11 @@ async function solveWithCloudflareResolver(url, timeout = 30000) {
 }
 
 async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
+  const headers = getRequestHeaders(url);
   const targetUrl = direct ? url : PROXY_URL + encodeURIComponent(url);
   try {
     const res = await fetch(targetUrl, {
-      headers: DEFAULT_HEADERS,
+      headers,
       signal: AbortSignal.timeout(timeout),
     });
     if (res.status === 404) throw new Error('HTTP 404');
@@ -201,33 +217,40 @@ async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
     }
 
     if (!direct) {
+      // Fallback 1: CORS Proxies públicos adicionais
+      const fallbacks = [
+        `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+        `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+      ];
+      for (const proxyUrl of fallbacks) {
+        try {
+          const resOrigin = await fetch(proxyUrl, {
+            headers,
+            signal: AbortSignal.timeout(6000),
+          });
+          if (resOrigin.status === 404) throw new Error('HTTP 404');
+          if (resOrigin.ok) {
+            const htmlOrigin = await resOrigin.text();
+            if (!htmlOrigin.includes('Just a moment...')) return htmlOrigin;
+          }
+        } catch (err2) {
+          if (err2.message === 'HTTP 404') throw err2;
+        }
+      }
+
+      // Fallback 2: Tenta direto como último fallback rápido (5s)
       try {
-        // Tenta allorigins como fallback proxy rápido (5s)
-        const resOrigin = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {
-          headers: DEFAULT_HEADERS,
+        const resDirect = await fetch(url, {
+          headers,
           signal: AbortSignal.timeout(5000),
         });
-        if (resOrigin.status === 404) throw new Error('HTTP 404');
-        if (!resOrigin.ok) throw new Error(`HTTP ${resOrigin.status}`);
-        const htmlOrigin = await resOrigin.text();
-        if (htmlOrigin.includes('Just a moment...')) throw new Error('Cloudflare Challenge (AllOrigins)');
-        return htmlOrigin;
-      } catch (err2) {
-        if (err2.message === 'HTTP 404') throw err2;
-        // Tenta direto como último fallback rápido (5s)
-        try {
-          const resDirect = await fetch(url, {
-            headers: DEFAULT_HEADERS,
-            signal: AbortSignal.timeout(5000),
-          });
-          if (resDirect.status === 404) throw new Error('HTTP 404');
-          if (!resDirect.ok) throw new Error(`HTTP ${resDirect.status} (direct)`);
+        if (resDirect.status === 404) throw new Error('HTTP 404');
+        if (resDirect.ok) {
           const htmlDirect = await resDirect.text();
-          if (htmlDirect.includes('Just a moment...')) throw new Error('Cloudflare Challenge (Direct)');
-          return htmlDirect;
-        } catch (err3) {
-          throw err3;
+          if (!htmlDirect.includes('Just a moment...')) return htmlDirect;
         }
+      } catch (err3) {
+        if (err3.message === 'HTTP 404') throw err3;
       }
     }
     throw err;
@@ -235,35 +258,42 @@ async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
 }
 
 async function fetchJson(url, { timeout = 15000, direct = false, ...opts } = {}) {
+  const headers = { ...getRequestHeaders(url), ...(opts.headers || {}) };
   const targetUrl = direct ? url : PROXY_URL + encodeURIComponent(url);
   try {
     const res = await fetch(targetUrl, {
-      headers: { ...DEFAULT_HEADERS, ...(opts.headers || {}) },
+      headers,
       signal: AbortSignal.timeout(timeout),
       ...opts,
     });
+    if (res.status === 404) throw new Error('HTTP 404');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
   } catch (err) {
+    if (err.message === 'HTTP 404') throw err;
     if (!direct) {
-      // Fallback 1: AllOrigins proxy
       try {
         const resOrigin = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {
-          headers: DEFAULT_HEADERS,
+          headers,
           signal: AbortSignal.timeout(timeout),
         });
+        if (resOrigin.status === 404) throw new Error('HTTP 404');
         if (resOrigin.ok) return await resOrigin.json();
-      } catch (_) {}
+      } catch (e) {
+        if (e.message === 'HTTP 404') throw e;
+      }
 
-      // Fallback 2: Tenta direto
       try {
         const resDirect = await fetch(url, {
-          headers: { ...DEFAULT_HEADERS, ...(opts.headers || {}) },
+          headers,
           signal: AbortSignal.timeout(10000),
           ...opts,
         });
+        if (resDirect.status === 404) throw new Error('HTTP 404');
         if (resDirect.ok) return await resDirect.json();
-      } catch (_) {}
+      } catch (e2) {
+        if (e2.message === 'HTTP 404') throw e2;
+      }
     }
     throw err;
   }
@@ -276,6 +306,39 @@ function slugify(str) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
+}
+
+function generateSlugCandidates(slug, rawTitle = '') {
+  const candidates = new Set();
+  if (slug) candidates.add(slug);
+
+  const cleanDub = (s) => s.replace(/-(?:dublado|legendado|online|hd|completo|filme|movie)$/gi, '');
+  const sNoDub = cleanDub(slug);
+  candidates.add(sNoDub);
+
+  const cleanSeason = (s) => s
+    .replace(/-(?:temporada|season|temp)-[0-9]+$/gi, '')
+    .replace(/-[0-9]+-(?:temporada|season|temp)$/gi, '')
+    .replace(/-[0-9]+$/g, '');
+
+  const sBase = cleanSeason(sNoDub);
+  candidates.add(sBase);
+  candidates.add(cleanDub(sBase));
+
+  candidates.add(`${sNoDub}-dublado`);
+  candidates.add(`${sBase}-dublado`);
+
+  if (rawTitle) {
+    const titleSlug = slugify(rawTitle);
+    candidates.add(titleSlug);
+    const titleCleanDub = cleanDub(titleSlug);
+    candidates.add(titleCleanDub);
+    const titleBase = cleanSeason(titleCleanDub);
+    candidates.add(titleBase);
+    candidates.add(`${titleBase}-dublado`);
+  }
+
+  return [...candidates].filter(Boolean);
 }
 
 function decodeHtmlEntities(str) {
@@ -1336,41 +1399,51 @@ async function resolveAnimeOnDemand(slug) {
     entry = index.animes[cleanS] || Object.values(index.animes).find(a => a.slug === slug || a.slug === cleanS);
   }
 
-  // 1. Tenta a source_url se cadastrada
-  if (entry && (entry.lazyUrl || entry.source_url)) {
-    const targetUrl = entry.lazyUrl || entry.source_url;
-    try {
-      console.log(`[resolveAnimeOnDemand] Tentando source_url: ${targetUrl}`);
-      const data = await addAnimeToDb(targetUrl);
-      if (data && data.episodes && Object.keys(data.episodes).length > 0) {
-        if (slug !== data.slug) {
-          saveAnimeFile(slug, { ...data, slug });
+  const rawTitle = entry?.title || slug;
+  const candidateSlugs = generateSlugCandidates(slug, rawTitle);
+  console.log(`[resolveAnimeOnDemand] Slugs candidatos (${slug}):`, candidateSlugs);
+
+  // 1. Verificar se o próprio anime ou algum slug candidato compatível já possui episódios no banco local/MongoDB!
+  for (const cand of candidateSlugs) {
+    const localCand = loadAnimeFile(cand);
+    if (localCand && localCand.episodes && Object.keys(localCand.episodes).length > 0) {
+      console.log(`[resolveAnimeOnDemand] SUCESSO LOCAL! Anime compatível "${cand}" já possui ${Object.keys(localCand.episodes).length} episódios.`);
+      if (slug !== cand) {
+        const aliased = { ...localCand, slug, title: entry?.title || localCand.title };
+        saveAnimeFile(slug, aliased);
+        const idx = loadIndex();
+        if (idx.animes[slug]) {
+          idx.animes[slug].episodes_count = Object.keys(aliased.episodes).length;
+          idx.animes[slug].lazy = false;
+          idx.animes[slug].cover_url = idx.animes[slug].cover_url || localCand.cover_url;
+          saveIndex(idx);
         }
-        return loadAnimeFile(slug) || data;
+        return aliased;
       }
-    } catch (e) {
-      console.warn(`[resolveAnimeOnDemand] source_url original falhou (${e.message}), buscando em provedores alternativos...`);
+      return localCand;
     }
   }
 
-  // 2. Extrai títulos candidatos para testar provedores alternativos
-  const rawTitle = entry?.title || slug;
-  const cleanTitle = rawTitle
-    .replace(/\s*[–-]?\s*(?:temporada|season|filme|movie|[0-9]+[ªº]?\s*temp|dublado|legendado)\s*.*$/gi, '')
-    .replace(/\s+[0-9]+$/g, '')
-    .trim();
+  // 2. Tenta a source_url se cadastrada (ignora goyabu.io pois está inativo)
+  if (entry && (entry.lazyUrl || entry.source_url)) {
+    const targetUrl = entry.lazyUrl || entry.source_url;
+    if (!targetUrl.includes('goyabu.io')) {
+      try {
+        console.log(`[resolveAnimeOnDemand] Tentando source_url: ${targetUrl}`);
+        const data = await addAnimeToDb(targetUrl);
+        if (data && data.episodes && Object.keys(data.episodes).length > 0) {
+          if (slug !== data.slug) {
+            saveAnimeFile(slug, { ...data, slug });
+          }
+          return loadAnimeFile(slug) || data;
+        }
+      } catch (e) {
+        console.warn(`[resolveAnimeOnDemand] source_url original falhou (${e.message}), buscando em provedores alternativos...`);
+      }
+    }
+  }
 
-  const titleSlug = slugify(cleanTitle);
-  const candidateSlugs = [...new Set([
-    slug,
-    titleSlug,
-    slug.replace(/-[0-9]+$/, ''),
-    slug.replace(/-dublado$/, ''),
-    slugify(rawTitle),
-  ])].filter(Boolean);
-
-  console.log(`[resolveAnimeOnDemand] Slugs candidatos (${cleanTitle}):`, candidateSlugs);
-
+  // 3. Provedores externos ordenados por assertividade
   for (const s of candidateSlugs) {
     const urls = [
       `https://animesonlinecc.to/anime/${s}/`,
@@ -1425,7 +1498,7 @@ async function resolveMissingEpisode(slug, ep, anime) {
 
   // 1. Tentar re-sincronizar a source_url existente para ver se saíram novos episódios
   const currentSource = anime.source_url || entry.source_url || entry.lazyUrl;
-  if (currentSource) {
+  if (currentSource && !currentSource.includes('goyabu.io')) {
     try {
       console.log(`[resolveMissingEpisode] Re-sincronizando fonte atual: ${currentSource}`);
       const fresh = await addAnimeToDb(currentSource);
@@ -1433,7 +1506,6 @@ async function resolveMissingEpisode(slug, ep, anime) {
         console.log(`[resolveMissingEpisode] Episódio ${ep} encontrado ao atualizar ${currentSource}!`);
         const updatedAnime = loadAnimeFile(slug) || fresh;
         const resVal = updatedAnime?.episodes?.[epKey] || fresh.episodes[epKey];
-        console.log(`[resolveMissingEpisode] resVal =`, resVal);
         return resVal;
       }
     } catch (e) {
@@ -1443,19 +1515,7 @@ async function resolveMissingEpisode(slug, ep, anime) {
 
   // 2. Extrair variações de slug para buscar em outros provedores
   const rawTitle = anime.title || entry.title || slug;
-  const cleanTitle = rawTitle
-    .replace(/\s*[–-]?\s*(?:temporada|season|filme|movie|[0-9]+[ªº]?\s*temp|dublado|legendado)\s*.*$/gi, '')
-    .replace(/\s+[0-9]+$/g, '')
-    .trim();
-
-  const titleSlug = slugify(cleanTitle);
-  const candidateSlugs = [...new Set([
-    slug,
-    titleSlug,
-    slug.replace(/-[0-9]+$/, ''),
-    slug.replace(/-dublado$/, ''),
-    slugify(rawTitle),
-  ])].filter(Boolean);
+  const candidateSlugs = generateSlugCandidates(slug, rawTitle);
 
   // 3. Tentar raspar o anime completo nos provedores alternativos
   for (const s of candidateSlugs) {
@@ -1466,14 +1526,13 @@ async function resolveMissingEpisode(slug, ep, anime) {
     ];
 
     for (const u of urls) {
-      if (u === currentSource) continue;
+      if (u === currentSource || u.includes('goyabu.io')) continue;
       try {
         console.log(`[resolveMissingEpisode] Verificando novos episódios em: ${u}`);
         const fresh = await addAnimeToDb(u);
         const epData = fresh?.episodes?.[epKey];
         if (epData) {
           console.log(`[resolveMissingEpisode] SUCESSO! Episódio ${ep} encontrado em ${u}`);
-          // Mescla com o anime existente
           anime.episodes = { ...(anime.episodes || {}), ...(fresh.episodes || {}) };
           anime.episodes_count = Object.keys(anime.episodes).length;
           saveAnimeFile(slug, anime);
@@ -1900,6 +1959,7 @@ export {
   // Calendar
   fetchJikanSchedule,
   slugify,
+  generateSlugCandidates,
   // Utils
   resolveBloggerUrl,
 };
