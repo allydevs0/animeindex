@@ -26,9 +26,9 @@ let backendReleasesCache = null;
 const memoryCache = new Map();
 
 /**
- * Função utilitária para chamar endpoints do backend com header de autenticação
+ * Função utilitária para chamar endpoints do backend com header de autenticação e retentativas automáticas
  */
-export async function backendFetch(endpoint, options = {}) {
+export async function backendFetch(endpoint, options = {}, retries = 2) {
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   const url = cleanEndpoint.startsWith('http') ? cleanEndpoint : `${BACKEND_URL}${cleanEndpoint}`;
   
@@ -39,20 +39,31 @@ export async function backendFetch(endpoint, options = {}) {
     ...(options.headers || {})
   };
 
-  const res = await fetch(url, {
-    ...options,
-    headers,
-  });
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, {
+        ...options,
+        headers,
+      });
 
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    const err = new Error(errorData.error || `Erro HTTP ${res.status}: ${res.statusText}`);
-    err.status = res.status;
-    err.data = errorData;
-    throw err;
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const err = new Error(errorData.error || `Erro HTTP ${res.status}: ${res.statusText}`);
+        err.status = res.status;
+        err.data = errorData;
+        throw err;
+      }
+
+      return await res.json();
+    } catch (err) {
+      if (attempt < retries) {
+        // Aguarda 1.5s antes de retentar (absorve cold-start do Render sem travar a interface)
+        await new Promise(r => setTimeout(r, 1500));
+        continue;
+      }
+      throw err;
+    }
   }
-
-  return res.json();
 }
 
 /**

@@ -336,6 +336,10 @@ export default function VideoPlayerView({
                 playsInline
                 onTimeUpdate={handleTimeUpdate}
                 onEnded={handleEnded}
+                onError={() => {
+                  console.warn('[Player] Falha na reprodução do stream direto.');
+                  setError('Falha ao reproduzir o vídeo. Tente recarregar o episódio.');
+                }}
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }}
               />
             )}
