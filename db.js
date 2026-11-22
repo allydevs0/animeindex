@@ -65,3 +65,29 @@ export function scheduleMongoSave(filename, data) {
     }, 5000); // Salva em lotes a cada 5 segundos para não spammar o banco
   }
 }
+
+export async function getMongoStatus() {
+  if (!db) {
+    return {
+      connected: false,
+      configured: Boolean(uri),
+      filesInCache: global.MONGO_CACHE ? Object.keys(global.MONGO_CACHE.files) : [],
+    };
+  }
+  try {
+    const totalDocs = await db.collection('vfs').countDocuments();
+    const indexDoc = await db.collection('vfs').findOne({ _id: 'index.json.gz' }, { projection: { 'data.animes': 1 } });
+    const animesInDb = indexDoc?.data?.animes ? Object.keys(indexDoc.data.animes).length : 0;
+    return {
+      connected: true,
+      database: db.databaseName,
+      collection: 'vfs',
+      totalDocuments: totalDocs,
+      animesInMongoIndex: animesInDb,
+      filesInCache: Object.keys(global.MONGO_CACHE.files),
+      saveQueuePending: saveQueue.size,
+    };
+  } catch (err) {
+    return { connected: false, error: err.message };
+  }
+}

@@ -12,7 +12,7 @@ import fs   from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { format } from 'util';
-import { initMongoDB } from './db.js';
+import { initMongoDB, getMongoStatus } from './db.js';
 import {
   loadIndex,
   saveIndex,
@@ -741,9 +741,9 @@ const server = http.createServer(async (req, res) => {
 
   // ⚡ GET /api/debug/mongo ⚡
   if (segment === 'debug/mongo' && method === 'GET') {
+    const mongoStatus = await getMongoStatus();
     return respond(res, 200, {
-      hasGlobalMongoCache: !!global.MONGO_CACHE,
-      filesInCache: global.MONGO_CACHE ? Object.keys(global.MONGO_CACHE.files) : [],
+      ...mongoStatus,
       mongoUrlPrefix: process.env.MONGO_URL ? process.env.MONGO_URL.substring(0, 15) + '...' : 'NOT_SET'
     });
   }

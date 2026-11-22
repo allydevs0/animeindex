@@ -57,7 +57,23 @@ function saveJsonGz(filePath, data) {
 
 function loadIndex() {
   ensureDirs();
-  const data = loadJsonGz(INDEX_PATH, null);
+  let data = loadJsonGz(INDEX_PATH, null);
+
+  // Auto-seed para o MongoDB se o banco estiver vazio mas houver backup no disco local
+  const animesCount = data && data.animes ? Object.keys(data.animes).length : 0;
+  if (animesCount === 0 && fs.existsSync(INDEX_PATH)) {
+    try {
+      const diskData = JSON.parse(zlib.gunzipSync(fs.readFileSync(INDEX_PATH)).toString('utf-8'));
+      if (diskData && diskData.animes && Object.keys(diskData.animes).length > 0) {
+        console.log(`[loadIndex] Semeando MongoDB com ${Object.keys(diskData.animes).length} animes do arquivo index.json.gz local...`);
+        data = diskData;
+        saveJsonGz(INDEX_PATH, data);
+      }
+    } catch (e) {
+      console.warn('[loadIndex] Falha ao tentar semear do disco:', e.message);
+    }
+  }
+
   if (!data) {
     const empty = { animes: {}, genres: {} };
     saveJsonGz(INDEX_PATH, empty);
