@@ -23,6 +23,7 @@ import {
   addAnimeToDb,
   getVideoSource,
   syncAiringAnimes,
+  fetchLatestReleases,
   bulkImportGoyabu,
   bulkImportAnimeFire,
   bulkImportAnimesOnline,
@@ -339,8 +340,15 @@ const server = http.createServer(async (req, res) => {
 
   // ─── GET /api/releases ─────────────────────────────────────────────
   if (segment === 'releases' && method === 'GET') {
-    const releases = loadReleases();
-    return respond(res, 200, [...releases].sort(
+    let releases = loadReleases();
+    if (!releases || releases.length === 0) {
+      try {
+        releases = await fetchLatestReleases();
+      } catch (err) {
+        console.warn('[releases] Erro ao buscar lançamentos online:', err.message);
+      }
+    }
+    return respond(res, 200, [...(releases || [])].sort(
       (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()
     ));
   }
@@ -761,9 +769,11 @@ initMongoDB().then(() => {
     console.log(`\n🎌 AnimeKaiKai! API em http://localhost:${PORT}`);
     console.log('   Endpoints: /api/animes, /api/index, /api/bulk, /api/sync, /api/calendar\n');
 
-    // Sync automático a cada 1 hora
+    // Sync automático de episódios lançados e animes em exibição
     setTimeout(() => {
+      fetchLatestReleases().catch(console.warn);
       syncAiringAnimes().catch(console.warn);
+      setInterval(() => fetchLatestReleases().catch(console.warn), 30 * 60 * 1000);
       setInterval(() => syncAiringAnimes().catch(console.warn), 60 * 60 * 1000);
     }, 10_000);
   });

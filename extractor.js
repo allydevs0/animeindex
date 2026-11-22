@@ -1388,6 +1388,90 @@ async function syncAiringAnimes() {
 }
 
 /* ==========================================
+   FETCH LATEST RELEASES (Últimos Episódios)
+========================================== */
+async function fetchLatestReleases() {
+  console.log('[releases] Buscando últimos episódios lançados...');
+  const releases = loadReleases();
+  const seen = new Set(releases.map(r => `${r.slug}-${r.episode}`));
+  const fresh = [];
+
+  // Fonte 1: AnimesOnline (class="item se episodes")
+  try {
+    const html = await fetchHtml('https://animesonlinecc.to/', { timeout: 15000 });
+    const epArticles = html.match(/<article[^>]*class=["'][^"']*episodes[^"']*["'][^>]*>[\s\S]*?<\/article>/gi) || [];
+    for (const art of epArticles) {
+      const linkMatch = art.match(/href=["'](?:https:\/\/animesonlinecc\.to\/)?(episodio\/[^"']+)["']/i);
+      if (!linkMatch) continue;
+      const fullUrl = 'https://animesonlinecc.to/' + linkMatch[1];
+      const titleMatch = art.match(/alt=["']([^"']+)["']/i)?.[1] || art.match(/<h3>\s*<a[^>]*>([^<]+)/i)?.[1];
+      const imgMatch = art.match(/src=["'](?:https:\/\/animesonlinecc\.to\/)?(wp-content\/[^"']+)["']/i)?.[1] || art.match(/src=["'](https?:\/\/[^"']+)["']/i)?.[1];
+      const fullImg = imgMatch ? (imgMatch.startsWith('http') ? imgMatch : 'https://animesonlinecc.to/' + imgMatch) : null;
+      
+      const epNum = art.match(/(?:epis[oó]dio|ep\.?)\s*([0-9]+)/i)?.[1] || linkMatch[1].match(/episodio-([0-9]+)/i)?.[1] || '1';
+      const cleanTitle = (titleMatch || '').replace(/\s*(?:epis[oó]dio|ep\.?)\s*[0-9]+/i, '').replace(/todos os epis[oó]dios.*$/i, '').trim();
+      const slug = slugify(cleanTitle);
+
+      const key = `${slug}-${epNum}`;
+      if (slug && !seen.has(key)) {
+        seen.add(key);
+        fresh.push({
+          slug,
+          title: cleanTitle,
+          episode: String(epNum),
+          cover_url: fullImg,
+          source_url: fullUrl,
+          provider: 'ao',
+          addedAt: new Date().toISOString()
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('[releases] Falha ao raspar AnimesOnline:', e.message);
+  }
+
+  // Fonte 2: MeusAnimes
+  try {
+    const html = await fetchHtml('https://meusanimes.blog/', { timeout: 15000 });
+    const epArticles = html.match(/<article[^>]*class=["'][^"']*episodes[^"']*["'][^>]*>[\s\S]*?<\/article>/gi) || [];
+    for (const art of epArticles) {
+      const link = art.match(/href=["'](https:\/\/meusanimes\.blog\/e\/[^"']+)["']/i)?.[1];
+      if (!link) continue;
+      const title = art.match(/alt=["']([^"']+)["']/i)?.[1] || art.match(/<div class=["']data["']>\s*<a[^>]*>([^<]+)/i)?.[1];
+      const img = art.match(/src=["'](https?:\/\/[^"']+)["']/i)?.[1];
+      const epNum = art.match(/(?:epis[oó]dio|ep\.?)\s*([0-9]+)/i)?.[1] || '1';
+      const cleanTitle = (title || '').replace(/\s*(?:epis[oó]dio|ep\.?)\s*[0-9]+/i, '').replace(/\s*dublado/i, '').trim();
+      const slug = slugify(cleanTitle);
+
+      const key = `${slug}-${epNum}`;
+      if (slug && !seen.has(key)) {
+        seen.add(key);
+        fresh.push({
+          slug,
+          title: cleanTitle,
+          episode: String(epNum),
+          cover_url: img,
+          source_url: link,
+          provider: 'ma',
+          addedAt: new Date().toISOString()
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('[releases] Falha ao raspar MeusAnimes:', e.message);
+  }
+
+  if (fresh.length > 0) {
+    console.log(`[releases] ${fresh.length} novos episódios encontrados e registrados!`);
+    const updated = [...fresh, ...releases].slice(0, 300);
+    saveReleases(updated);
+    return updated;
+  }
+
+  return releases;
+}
+
+/* ==========================================
    JIKAN CALENDAR
 ========================================== */
 const JIKAN_CACHE_PATH = path.join(DATA_DIR, 'jikan_cache.json.gz');
@@ -1491,6 +1575,7 @@ export {
   addAnimeToDb,
   getVideoSource,
   syncAiringAnimes,
+  fetchLatestReleases,
   // Bulk import
   bulkImportGoyabu,
   bulkImportAnimeFire,
