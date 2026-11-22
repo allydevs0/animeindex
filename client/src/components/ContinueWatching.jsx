@@ -1,6 +1,7 @@
 import React from 'react';
 import { Play, X, Clock } from 'lucide-react';
 import { StorageService } from '../services/storage.js';
+import { getSafeBanner, BACKEND_URL } from '../services/api.js';
 
 export default function ContinueWatching({ 
   history = [], 
@@ -50,8 +51,15 @@ export default function ContinueWatching({
               {/* Thumbnail com Barra de Progresso */}
               <div style={{ position: 'relative', width: '100%', height: '145px', overflow: 'hidden', background: '#000' }}>
                 <img
-                  src={item.banner_url || item.cover_url}
+                  src={getSafeBanner(item)}
                   alt={item.title}
+                  onError={(e) => {
+                    const slug = item.slug || item.animeId;
+                    const fallback = slug ? `${BACKEND_URL}/api/cover/${slug}` : 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/default.jpg';
+                    if (e.target.src !== fallback) {
+                      e.target.src = fallback;
+                    }
+                  }}
                   style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: 0.85 }}
                 />
 

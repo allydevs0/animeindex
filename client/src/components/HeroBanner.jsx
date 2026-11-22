@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Info, Bookmark, Star, Calendar, ChevronLeft, ChevronRight, Check } from 'lucide-react';
 import { StorageService } from '../services/storage.js';
+import { getSafeBanner } from '../services/api.js';
 
 export default function HeroBanner({ 
   featuredAnimes = [], 
@@ -43,7 +44,7 @@ export default function HeroBanner({
     }
   };
 
-  const bannerImg = currentAnime.banner_url || currentAnime.cover_url;
+  const bannerImg = getSafeBanner(currentAnime);
 
   return (
     <div style={{

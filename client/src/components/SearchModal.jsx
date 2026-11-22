@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Star, Calendar, ArrowRight, Sparkles } from 'lucide-react';
-import { AnimeApi } from '../services/api.js';
+import { AnimeApi, getSafePoster, BACKEND_URL } from '../services/api.js';
 
 const QUICK_GENRES = [
   'Ação', 'Aventura', 'Comédia', 'Drama', 'Fantasia', 'Romance', 'Sci-Fi', 'Suspense'
@@ -183,8 +183,15 @@ export default function SearchModal({
               className="search-result-item"
             >
               <img
-                src={anime.cover_url}
+                src={getSafePoster(anime)}
                 alt={anime.title}
+                onError={(e) => {
+                  const slug = anime.slug || anime.id || anime.mal_id;
+                  const fallback = slug ? `${BACKEND_URL}/api/cover/${slug}` : 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg';
+                  if (e.target.src !== fallback) {
+                    e.target.src = fallback;
+                  }
+                }}
                 style={{
                   width: '46px',
                   height: '64px',

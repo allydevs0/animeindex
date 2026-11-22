@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Bookmark, Star, Play, Trash2, Heart, CheckCircle2, Clock } from 'lucide-react';
 import { StorageService } from '../services/storage.js';
+import { getSafePoster, BACKEND_URL } from '../services/api.js';
 
 export default function WatchlistSection({ 
   watchlist = [], 
@@ -110,8 +111,15 @@ export default function WatchlistSection({
             >
               <div className="card-poster-wrapper">
                 <img
-                  src={item.cover_url}
+                  src={getSafePoster(item)}
                   alt={item.title}
+                  onError={(e) => {
+                    const slug = item.slug || item.animeId;
+                    const fallback = slug ? `${BACKEND_URL}/api/cover/${slug}` : 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg';
+                    if (e.target.src !== fallback) {
+                      e.target.src = fallback;
+                    }
+                  }}
                   className="card-poster"
                 />
 

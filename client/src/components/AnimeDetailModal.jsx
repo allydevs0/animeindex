@@ -13,6 +13,7 @@ import {
   Share2 
 } from 'lucide-react';
 import { StorageService } from '../services/storage.js';
+import { getSafePoster, getSafeBanner, BACKEND_URL } from '../services/api.js';
 
 export default function AnimeDetailModal({ 
   anime, 
@@ -72,8 +73,8 @@ export default function AnimeDetailModal({
     }
   };
 
-  const banner = anime.banner_url || anime.cover_url;
-  const poster = anime.cover_url || anime.images?.jpg?.large_image_url;
+  const banner = getSafeBanner(anime);
+  const poster = getSafePoster(anime);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -93,6 +94,13 @@ export default function AnimeDetailModal({
           <img
             src={banner}
             alt={anime.title}
+            onError={(e) => {
+              const slug = anime.slug || anime.id || anime.mal_id;
+              const fallback = slug ? `${BACKEND_URL}/api/cover/${slug}` : 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/default.jpg';
+              if (e.target.src !== fallback) {
+                e.target.src = fallback;
+              }
+            }}
             style={{
               width: '100%',
               height: '100%',
@@ -164,6 +172,13 @@ export default function AnimeDetailModal({
               <img
                 src={poster}
                 alt={anime.title}
+                onError={(e) => {
+                  const slug = anime.slug || anime.id || anime.mal_id;
+                  const fallback = slug ? `${BACKEND_URL}/api/cover/${slug}` : 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg';
+                  if (e.target.src !== fallback) {
+                    e.target.src = fallback;
+                  }
+                }}
                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               />
             </div>

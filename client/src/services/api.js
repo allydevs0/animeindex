@@ -67,14 +67,61 @@ export async function backendFetch(endpoint, options = {}, retries = 2) {
 }
 
 /**
+ * Verifica se a URL da capa é proveniente de scrapers com hotlink protection ou quebrada
+ */
+export function isScrapedOrBrokenCover(url) {
+  if (!url || typeof url !== 'string' || url.trim() === '') return true;
+  const lower = url.toLowerCase();
+  return (
+    lower.includes('meusanimes.blog') ||
+    lower.includes('animesonlinecc.to') ||
+    lower.includes('animesonline') ||
+    lower.includes('animefire.plus') ||
+    lower.includes('goyabu.to') ||
+    lower.includes('meusdoramas.club') ||
+    lower.includes('wp-content/uploads') ||
+    lower.includes('unsplash.com') ||
+    lower.includes('via.placeholder.com')
+  );
+}
+
+export function getSafePoster(anime) {
+  if (!anime) return 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg';
+  const slug = anime.slug || String(anime.id || anime.mal_id || '');
+  let cover = anime.cover_url || anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url;
+  if (!cover || isScrapedOrBrokenCover(cover)) {
+    if (slug) return `${BACKEND_URL}/api/cover/${slug}`;
+    return 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg';
+  }
+  return cover;
+}
+
+export function getSafeBanner(anime) {
+  if (!anime) return 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/default.jpg';
+  const slug = anime.slug || String(anime.id || anime.mal_id || '');
+  let banner = anime.banner_url || anime.cover_url;
+  if (!banner || isScrapedOrBrokenCover(banner)) {
+    if (slug) return `${BACKEND_URL}/api/cover/${slug}`;
+    return 'https://s4.anilist.co/file/anilistcdn/media/anime/banner/default.jpg';
+  }
+  return banner;
+}
+
+/**
  * Normaliza objetos de animes vindos do backend ou do Jikan para formato unificado
  */
 export function normalizeAnime(raw, defaultSlug = '') {
   if (!raw) return null;
 
   const slug = raw.slug || defaultSlug || (raw.title || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-  const cover = raw.cover_url || raw.images?.jpg?.large_image_url || raw.images?.jpg?.image_url || '';
-  const banner = raw.banner_url || cover;
+  let cover = raw.cover_url || raw.images?.jpg?.large_image_url || raw.images?.jpg?.image_url || '';
+  if (isScrapedOrBrokenCover(cover) && slug) {
+    cover = `${BACKEND_URL}/api/cover/${slug}`;
+  }
+  let banner = raw.banner_url || cover;
+  if (isScrapedOrBrokenCover(banner) && slug) {
+    banner = `${BACKEND_URL}/api/cover/${slug}`;
+  }
   
   // Trata contagem de episódios
   let totalEpisodes = raw.episodes_count || raw.episodes;

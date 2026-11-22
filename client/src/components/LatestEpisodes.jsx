@@ -1,4 +1,5 @@
 import React from 'react';
+import { getSafePoster, BACKEND_URL } from '../services/api.js';
 
 const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
 
@@ -38,11 +39,15 @@ export default function LatestEpisodes({ schedule, onAnimeClick }) {
           >
             <div className="latest-ep-cover">
               <img
-                src={anime.cover_url}
+                src={getSafePoster(anime)}
                 alt={anime.title}
                 loading="lazy"
                 onError={(e) => {
-                  e.target.src = `https://via.placeholder.com/160x240/12121a/9090b0?text=${encodeURIComponent(anime.title?.slice(0, 10) || '?')}`;
+                  const slug = anime.slug || anime.id || anime.mal_id;
+                  const fallback = slug ? `${BACKEND_URL}/api/cover/${slug}` : 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg';
+                  if (e.target.src !== fallback) {
+                    e.target.src = fallback;
+                  }
                 }}
               />
               <div className="latest-ep-overlay">

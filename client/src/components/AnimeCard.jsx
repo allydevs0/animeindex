@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Play, Star, Bookmark, Check } from 'lucide-react';
 import { StorageService } from '../services/storage.js';
+import { getSafePoster, BACKEND_URL } from '../services/api.js';
 
 export default function AnimeCard({ 
   anime, 
@@ -38,7 +39,7 @@ export default function AnimeCard({
     }
   };
 
-  const poster = anime.cover_url || anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url;
+  const poster = getSafePoster(anime);
 
   return (
     <div 
@@ -52,7 +53,11 @@ export default function AnimeCard({
           loading="lazy"
           className="card-poster"
           onError={(e) => {
-            e.target.src = `https://images.unsplash.com/photo-1578632767115-351597cf2477?w=300&auto=format&fit=crop&q=80`;
+            const slug = anime.slug || anime.id || anime.mal_id;
+            const fallback = slug ? `${BACKEND_URL}/api/cover/${slug}` : 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg';
+            if (e.target.src !== fallback) {
+              e.target.src = fallback;
+            }
           }}
         />
 
