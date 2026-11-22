@@ -1085,7 +1085,19 @@ async function addAnimeToDb(url) {
   else if (provider === 'ao') scraped = await scrapeAnimesOnline(url);
   else throw new Error(`Scraper não implementado para provider: ${provider}`);
 
-  const { title, slug, cover_url, synopsis, genres, source_url, airing, episodes } = scraped;
+  let { title, slug, cover_url, synopsis, genres, source_url, airing, episodes } = scraped;
+
+  let banner_url = null;
+  // Se a capa obtida for de scraper ou vazia, busca a capa e banner oficiais em HD (AniList / Kitsu / Jikan)
+  if (isScrapedOrBrokenUrl(cover_url)) {
+    try {
+      const thumb = await fetchAnimeThumb(title, slug);
+      if (thumb && thumb.poster) {
+        cover_url = thumb.poster;
+        banner_url = thumb.banner || null;
+      }
+    } catch {}
+  }
 
   const index   = loadIndex();
   const existing = loadAnimeFile(slug) || {};
@@ -1108,6 +1120,7 @@ async function addAnimeToDb(url) {
     title,
     slug,
     cover_url,
+    banner_url: banner_url || existing.banner_url || cover_url,
     synopsis: synopsis || existing.synopsis || '',
     genres:   genres.length > 0 ? genres : (existing.genres || []),
     source_url,
@@ -1822,6 +1835,141 @@ async function fetchLatestReleases() {
 }
 
 /* ==========================================
+   OFFICIAL THUMBNAIL RESOLVER (AniList / Kitsu / Jikan)
+========================================== */
+const COVERS_CACHE_PATH = path.join(DATA_DIR, 'covers_cache.json.gz');
+let coversMemoryCache = null;
+
+function loadCoversCache() {
+  if (!coversMemoryCache) {
+    coversMemoryCache = loadJsonGz(COVERS_CACHE_PATH, {});
+  }
+  return coversMemoryCache;
+}
+
+function saveCoverToCache(slug, thumb) {
+  const cache = loadCoversCache();
+  cache[slug] = thumb;
+  saveJsonGz(COVERS_CACHE_PATH, cache);
+}
+
+function isScrapedOrBrokenUrl(url) {
+  if (!url || typeof url !== 'string' || url.trim() === '') return true;
+  const lower = url.toLowerCase();
+  return (
+    lower.includes('meusanimes.blog') ||
+    lower.includes('animesonlinecc.to') ||
+    lower.includes('animesonline') ||
+    lower.includes('animefire.plus') ||
+    lower.includes('goyabu.to') ||
+    lower.includes('meusdoramas.club') ||
+    lower.includes('wp-content/uploads') ||
+    lower.includes('unsplash.com') ||
+    lower.includes('via.placeholder.com') ||
+    lower.startsWith('/api/cover/')
+  );
+}
+
+/**
+ * Busca capa e banner oficiais em alta definição em provedores abertos: AniList, Kitsu e Jikan (MyAnimeList)
+ */
+async function fetchAnimeThumb(title, slug = null) {
+  if (!title && !slug) return null;
+  const cache = loadCoversCache();
+  if (slug && cache[slug] && cache[slug].poster) {
+    return cache[slug];
+  }
+
+  // Limpa sufixos de scrapers para busca limpa nas bases de anime oficiais
+  const rawTitle = title || (slug ? slug.replace(/-/g, ' ') : '');
+  const cleanTitle = rawTitle
+    .replace(/(\s*-\s*|\s+)(dublado|legendado|todos\s+os\s+episodios|temporada|\d+ª\s+temporada).*/gi, '')
+    .replace(/-\d+$/g, '')
+    .replace(/-/g, ' ')
+    .trim();
+
+  // 1. AniList GraphQL (capas 1080p, banners widescreen, sem bloqueio de IP)
+  try {
+    const postData = JSON.stringify({
+      query: 'query ($s: String) { Media(search: $s, type: ANIME) { title { romaji english native } coverImage { extraLarge large } bannerImage score: averageScore } }',
+      variables: { s: cleanTitle }
+    });
+    const res = await fetch('https://graphql.anilist.co', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+      body: postData,
+      signal: AbortSignal.timeout(4000),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      const m = json.data?.Media;
+      const poster = m?.coverImage?.extraLarge || m?.coverImage?.large;
+      if (poster) {
+        const result = {
+          poster,
+          banner: m?.bannerImage || null,
+          title: m?.title?.english || m?.title?.romaji || cleanTitle,
+          score: m?.score ? (m.score / 10).toFixed(1) : null,
+          source: 'anilist'
+        };
+        if (slug) saveCoverToCache(slug, result);
+        return result;
+      }
+    }
+  } catch {}
+
+  // 2. Kitsu API (aberto e CDN rápida media.kitsu.app)
+  try {
+    const resKitsu = await fetch(`https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(cleanTitle)}&page[limit]=1`, {
+      headers: { 'Accept': 'application/vnd.api+json', 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (resKitsu.ok) {
+      const json = await resKitsu.json();
+      const a = json.data?.[0];
+      const poster = a?.attributes?.posterImage?.large || a?.attributes?.posterImage?.original;
+      if (poster) {
+        const result = {
+          poster,
+          banner: a?.attributes?.coverImage?.large || a?.attributes?.coverImage?.original || null,
+          title: a?.attributes?.canonicalTitle || cleanTitle,
+          score: a?.attributes?.averageRating ? (parseFloat(a.attributes.averageRating) / 10).toFixed(1) : null,
+          source: 'kitsu'
+        };
+        if (slug) saveCoverToCache(slug, result);
+        return result;
+      }
+    }
+  } catch {}
+
+  // 3. Jikan API (MyAnimeList oficial: cdn.myanimelist.net)
+  try {
+    const resJikan = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(cleanTitle)}&limit=1`, {
+      headers: { 'Accept': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (resJikan.ok) {
+      const json = await resJikan.json();
+      const a = json.data?.[0];
+      const poster = a?.images?.webp?.large_image_url || a?.images?.jpg?.large_image_url || a?.images?.jpg?.image_url;
+      if (poster) {
+        const result = {
+          poster,
+          banner: a?.trailer?.images?.maximum_image_url || null,
+          title: a?.title_english || a?.title || cleanTitle,
+          score: a?.score ? a.score.toFixed(1) : null,
+          source: 'jikan'
+        };
+        if (slug) saveCoverToCache(slug, result);
+        return result;
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
+/* ==========================================
    JIKAN CALENDAR
 ========================================== */
 const JIKAN_CACHE_PATH = path.join(DATA_DIR, 'jikan_cache.json.gz');
@@ -1939,4 +2087,8 @@ export {
   generateSlugCandidates,
   // Utils
   resolveBloggerUrl,
+  // Thumbnails
+  fetchAnimeThumb,
+  isScrapedOrBrokenUrl,
+  loadCoversCache,
 };

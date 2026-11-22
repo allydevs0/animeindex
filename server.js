@@ -35,6 +35,9 @@ import {
   loadSessionsLog,
   appendSessionLog,
   slugify,
+  fetchAnimeThumb,
+  isScrapedOrBrokenUrl,
+  loadCoversCache,
 } from './extractor.js';
 
 
@@ -318,10 +321,57 @@ const server = http.createServer(async (req, res) => {
   }
 
 
+  // ─── GET /api/cover/:slug — Redireciona para capa oficial em HD (AniList / Kitsu / Jikan) ───
+  if (segment.startsWith('cover/') && method === 'GET') {
+    const slug = segment.replace('cover/', '').replace(/\/$/, '');
+    const idx = loadIndex();
+    const existing = idx.animes[slug];
+    const title = existing?.title || slug;
+
+    const thumb = await fetchAnimeThumb(title, slug);
+    if (thumb && thumb.poster) {
+      res.writeHead(302, {
+        'Location': thumb.poster,
+        'Cache-Control': 'public, max-age=604800, immutable',
+        ...getCorsHeaders(req)
+      });
+      res.end();
+      return;
+    }
+
+    if (existing?.cover_url && !isScrapedOrBrokenUrl(existing.cover_url)) {
+      res.writeHead(302, {
+        'Location': existing.cover_url,
+        'Cache-Control': 'public, max-age=86400',
+        ...getCorsHeaders(req)
+      });
+      res.end();
+      return;
+    }
+
+    res.writeHead(302, {
+      'Location': 'https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/default.jpg',
+      ...getCorsHeaders(req)
+    });
+    res.end();
+    return;
+  }
+
   // ─── GET /api/animes ───────────────────────────────────────────────
   if (segment === 'animes' && method === 'GET') {
     const index = loadIndex();
-    return respond(res, 200, index.animes);
+    const coversCache = loadCoversCache();
+    const enriched = {};
+    for (const [s, a] of Object.entries(index.animes)) {
+      let cover = a.cover_url;
+      if (coversCache[s]?.poster) {
+        cover = coversCache[s].poster;
+      } else if (isScrapedOrBrokenUrl(cover)) {
+        cover = `/api/cover/${s}`;
+      }
+      enriched[s] = { ...a, cover_url: cover };
+    }
+    return respond(res, 200, enriched);
   }
 
   // ─── GET /api/genres ───────────────────────────────────────────────
@@ -340,7 +390,17 @@ const server = http.createServer(async (req, res) => {
         console.warn('[releases] Erro ao buscar lançamentos online:', err.message);
       }
     }
-    return respond(res, 200, [...(releases || [])].sort(
+    const coversCache = loadCoversCache();
+    const sanitized = (releases || []).map(r => {
+      let cover = r.cover_url;
+      if (coversCache[r.slug]?.poster) {
+        cover = coversCache[r.slug].poster;
+      } else if (isScrapedOrBrokenUrl(cover)) {
+        cover = `/api/cover/${r.slug}`;
+      }
+      return { ...r, cover_url: cover };
+    });
+    return respond(res, 200, sanitized.sort(
       (a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime()
     ));
   }
@@ -512,6 +572,18 @@ const server = http.createServer(async (req, res) => {
       if (!animeData) {
         return respond(res, 404, { error: 'Anime não encontrado no catálogo' });
       }
+    }
+
+    // Enriquece com capa e banner oficiais se necessário
+    if (isScrapedOrBrokenUrl(animeData.cover_url) || !animeData.banner_url) {
+      try {
+        const thumb = await fetchAnimeThumb(animeData.title, slug);
+        if (thumb) {
+          if (thumb.poster && isScrapedOrBrokenUrl(animeData.cover_url)) animeData.cover_url = thumb.poster;
+          if (thumb.banner && !animeData.banner_url) animeData.banner_url = thumb.banner;
+          saveAnimeFile(slug, animeData);
+        }
+      } catch {}
     }
 
     return respond(res, 200, animeData);
