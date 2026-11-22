@@ -152,6 +152,30 @@ const DEFAULT_HEADERS = {
   'Referer': 'https://goyabu.io/',
 };
 
+const CF_RESOLVER_URL = process.env.CLOUDFLARE_RESOLVER_URL || process.env.FLARESOLVERR_URL || null;
+
+async function solveWithCloudflareResolver(url, timeout = 30000) {
+  if (!CF_RESOLVER_URL) return null;
+  try {
+    console.log(`[cfResolver] Resolvendo Cloudflare via ${CF_RESOLVER_URL} para: ${url}`);
+    const endpoint = CF_RESOLVER_URL.endsWith('/v1') ? CF_RESOLVER_URL : `${CF_RESOLVER_URL.replace(/\/+$/, '')}/v1`;
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cmd: 'request.get', url, maxTimeout: timeout }),
+      signal: AbortSignal.timeout(timeout + 5000),
+    });
+    const json = await res.json();
+    if (json.status === 'ok' && json.solution && json.solution.response) {
+      console.log(`[cfResolver] Cloudflare resolvido com sucesso!`);
+      return json.solution.response;
+    }
+  } catch (err) {
+    console.warn(`[cfResolver] Falha no resolver:`, err.message);
+  }
+  return null;
+}
+
 async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
   const targetUrl = direct ? url : PROXY_URL + encodeURIComponent(url);
   try {
@@ -159,28 +183,51 @@ async function fetchHtml(url, { timeout = 15000, direct = false } = {}) {
       headers: DEFAULT_HEADERS,
       signal: AbortSignal.timeout(timeout),
     });
+    if (res.status === 404) throw new Error('HTTP 404');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.text();
+    const html = await res.text();
+    if (html.includes('<title>Just a moment...</title>') || html.includes('id="challenge-platform"')) {
+      throw new Error('Cloudflare Challenge detectado');
+    }
+    return html;
   } catch (err) {
-    console.error(`[fetchHtml] Proxy falhou na URL (${url}) Erro:`, err.message);
+    if (err.message === 'HTTP 404') throw err;
+    console.warn(`[fetchHtml] Proxy falhou na URL (${url}) Erro:`, err.message);
+
+    // Se temos um FlareSolverr / Cloudflare Resolver configurado, tenta resolver o desafio
+    if (CF_RESOLVER_URL) {
+      const solved = await solveWithCloudflareResolver(url, Math.min(timeout, 20000));
+      if (solved && !solved.includes('Just a moment...')) return solved;
+    }
+
     if (!direct) {
       try {
-        // Tenta allorigins como fallback proxy
+        // Tenta allorigins como fallback proxy rápido (5s)
         const resOrigin = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, {
           headers: DEFAULT_HEADERS,
-          signal: AbortSignal.timeout(timeout),
+          signal: AbortSignal.timeout(5000),
         });
+        if (resOrigin.status === 404) throw new Error('HTTP 404');
         if (!resOrigin.ok) throw new Error(`HTTP ${resOrigin.status}`);
-        return await resOrigin.text();
+        const htmlOrigin = await resOrigin.text();
+        if (htmlOrigin.includes('Just a moment...')) throw new Error('Cloudflare Challenge (AllOrigins)');
+        return htmlOrigin;
       } catch (err2) {
-        console.error(`[fetchHtml] AllOrigins falhou na URL (${url}) Erro:`, err2.message);
-        // Tenta direto como último fallback
-        const resDirect = await fetch(url, {
-          headers: DEFAULT_HEADERS,
-          signal: AbortSignal.timeout(10000),
-        });
-        if (!resDirect.ok) throw new Error(`HTTP ${resDirect.status} (direct)`);
-        return await resDirect.text();
+        if (err2.message === 'HTTP 404') throw err2;
+        // Tenta direto como último fallback rápido (5s)
+        try {
+          const resDirect = await fetch(url, {
+            headers: DEFAULT_HEADERS,
+            signal: AbortSignal.timeout(5000),
+          });
+          if (resDirect.status === 404) throw new Error('HTTP 404');
+          if (!resDirect.ok) throw new Error(`HTTP ${resDirect.status} (direct)`);
+          const htmlDirect = await resDirect.text();
+          if (htmlDirect.includes('Just a moment...')) throw new Error('Cloudflare Challenge (Direct)');
+          return htmlDirect;
+        } catch (err3) {
+          throw err3;
+        }
       }
     }
     throw err;
@@ -660,8 +707,19 @@ async function extractAnimesOnline(pageUrl) {
     const url = decodeURIComponent(u);
     const direct = await resolveBloggerUrl(url);
     if (direct) {
-      if (direct.includes('.m3u8')) return { type: 'hls', url: direct };
-      if (direct.includes('.mp4')) return { type: 'direct', url: direct };
+      if (typeof direct === 'string') {
+        if (direct.includes('.m3u8')) return { type: 'hls', url: direct, hd: direct, sd: null };
+        if (direct.includes('.mp4') || direct.includes('googlevideo.com')) return { type: 'direct', url: direct, hd: direct, sd: null };
+      } else {
+        const { hd, sd } = direct;
+        const directUrl = hd || sd;
+        if (directUrl) {
+          if (directUrl.includes('.m3u8')) return { type: 'hls', url: directUrl, hd, sd };
+          if (directUrl.includes('.mp4') || directUrl.includes('googlevideo.com')) {
+            return { type: 'direct', url: directUrl, hd, sd };
+          }
+        }
+      }
     }
     return { type: 'iframe', url };
   }
@@ -671,8 +729,19 @@ async function extractAnimesOnline(pageUrl) {
     const url = `https://www.blogger.com/video.g?token=${tokenMatch[1]}`;
     const direct = await resolveBloggerUrl(url);
     if (direct) {
-      if (direct.includes('.m3u8')) return { type: 'hls', url: direct };
-      if (direct.includes('.mp4')) return { type: 'direct', url: direct };
+      if (typeof direct === 'string') {
+        if (direct.includes('.m3u8')) return { type: 'hls', url: direct, hd: direct, sd: null };
+        if (direct.includes('.mp4') || direct.includes('googlevideo.com')) return { type: 'direct', url: direct, hd: direct, sd: null };
+      } else {
+        const { hd, sd } = direct;
+        const directUrl = hd || sd;
+        if (directUrl) {
+          if (directUrl.includes('.m3u8')) return { type: 'hls', url: directUrl, hd, sd };
+          if (directUrl.includes('.mp4') || directUrl.includes('googlevideo.com')) {
+            return { type: 'direct', url: directUrl, hd, sd };
+          }
+        }
+      }
     }
     return { type: 'iframe', url };
   }
@@ -815,6 +884,7 @@ async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
         .replace(/\\\\u003c/g, '<')
         .replace(/\\\\u003e/g, '>');
       url = url.replace(/\\u002f/g, '/').replace(/\\u003d/g, '=').replace(/\\u0026/g, '&');
+      url = url.replace(/[\\"]+$/, '');
       fallbackUrls.push(url);
     }
 
@@ -838,13 +908,25 @@ async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
   return null;
 }
 
+function substringAfter(str, delim) {
+  if (!str || typeof str !== 'string') return '';
+  const idx = str.indexOf(delim);
+  return idx === -1 ? '' : str.substring(idx + delim.length);
+}
+
+function substringBefore(str, delim) {
+  if (!str || typeof str !== 'string') return '';
+  const idx = str.indexOf(delim);
+  return idx === -1 ? '' : str.substring(0, idx);
+}
+
 /** Extract all video URLs from RPC response text */
 function _extractAllBloggerUrls(rpcText) {
   const urls = [];
   try {
-    const afterStart = rpcText.substringAfter('[[\\"');
+    const afterStart = substringAfter(rpcText, '[[\\"');
     if (afterStart) {
-      const beforeEnd = afterStart.substringBefore(']]]');
+      const beforeEnd = substringBefore(afterStart, ']]]');
       if (beforeEnd) {
         const segments = beforeEnd.split('],[');
         for (const seg of segments) {
@@ -853,6 +935,7 @@ function _extractAllBloggerUrls(rpcText) {
             let url = urlMatch[1];
             url = url.replace(/\\\\u002f/g, '/').replace(/\\\\u003d/g, '=').replace(/\\\\u0026/g, '&');
             url = url.replace(/\\u002f/g, '/').replace(/\\u003d/g, '=').replace(/\\u0026/g, '&');
+            url = url.replace(/[\\"]+$/, '');
             if (url.includes('googlevideo.com') || url.includes('.mp4') || url.includes('videoplayback')) {
               urls.push(url);
             }
@@ -1241,13 +1324,114 @@ async function bulkImportMeusAnimes(onProgress = null) {
 }
 
 /* ==========================================
+   RESOLVE ANIME ON DEMAND (Multi-Provider & Cloudflare Bypass)
+========================================== */
+async function resolveAnimeOnDemand(slug) {
+  console.log(`[resolveAnimeOnDemand] Iniciando resolução on-demand para "${slug}"...`);
+  const index = loadIndex();
+  let entry = index.animes[slug];
+
+  if (!entry) {
+    const cleanS = slug.replace(/-[0-9]+$/, '').replace(/-dublado$/, '');
+    entry = index.animes[cleanS] || Object.values(index.animes).find(a => a.slug === slug || a.slug === cleanS);
+  }
+
+  // 1. Tenta a source_url se cadastrada
+  if (entry && (entry.lazyUrl || entry.source_url)) {
+    const targetUrl = entry.lazyUrl || entry.source_url;
+    try {
+      console.log(`[resolveAnimeOnDemand] Tentando source_url: ${targetUrl}`);
+      const data = await addAnimeToDb(targetUrl);
+      if (data && data.episodes && Object.keys(data.episodes).length > 0) {
+        if (slug !== data.slug) {
+          saveAnimeFile(slug, { ...data, slug });
+        }
+        return loadAnimeFile(slug) || data;
+      }
+    } catch (e) {
+      console.warn(`[resolveAnimeOnDemand] source_url original falhou (${e.message}), buscando em provedores alternativos...`);
+    }
+  }
+
+  // 2. Extrai títulos candidatos para testar provedores alternativos
+  const rawTitle = entry?.title || slug;
+  const cleanTitle = rawTitle
+    .replace(/\s*[–-]?\s*(?:temporada|season|filme|movie|[0-9]+[ªº]?\s*temp|dublado|legendado)\s*.*$/gi, '')
+    .replace(/\s+[0-9]+$/g, '')
+    .trim();
+
+  const titleSlug = slugify(cleanTitle);
+  const candidateSlugs = [...new Set([
+    slug,
+    titleSlug,
+    slug.replace(/-[0-9]+$/, ''),
+    slug.replace(/-dublado$/, ''),
+    slugify(rawTitle),
+  ])].filter(Boolean);
+
+  console.log(`[resolveAnimeOnDemand] Slugs candidatos (${cleanTitle}):`, candidateSlugs);
+
+  for (const s of candidateSlugs) {
+    const urls = [
+      `https://animesonlinecc.to/anime/${s}/`,
+      `https://animefire.plus/animes/${s}-todos-os-episodios`,
+      `https://meusanimes.blog/anime/${s}/`,
+      `https://animesonlinecc.to/anime/${s}-2/`,
+      `https://animesonlinecc.to/anime/${s}-2-temporada/`,
+    ];
+
+    for (const u of urls) {
+      try {
+        console.log(`[resolveAnimeOnDemand] Testando provedor: ${u}`);
+        const data = await addAnimeToDb(u);
+        if (data && data.episodes && Object.keys(data.episodes).length > 0) {
+          console.log(`[resolveAnimeOnDemand] SUCESSO! Anime "${slug}" resolvido via ${u} com ${Object.keys(data.episodes).length} episódios.`);
+          
+          const savedData = { ...data, slug };
+          saveAnimeFile(slug, savedData);
+
+          const idx = loadIndex();
+          idx.animes[slug] = {
+            ...(idx.animes[slug] || {}),
+            title: data.title || rawTitle,
+            slug,
+            cover_url: data.cover_url || (idx.animes[slug]?.cover_url || ''),
+            episodes_count: Object.keys(data.episodes).length,
+            lazy: false,
+            source_url: u,
+          };
+          saveIndex(idx);
+
+          return savedData;
+        }
+      } catch (err) {
+        // Tenta a próxima URL
+      }
+    }
+  }
+
+  console.warn(`[resolveAnimeOnDemand] Não foi possível resolver "${slug}" em nenhum provedor.`);
+  return null;
+}
+
+/* ==========================================
    GET VIDEO SOURCE
 ========================================== */
 async function getVideoSource(slug, ep) {
-  const anime = loadAnimeFile(slug);
+  let anime = loadAnimeFile(slug);
+  if (!anime || !anime.episodes || Object.keys(anime.episodes).length === 0) {
+    console.log(`[getVideoSource] Anime "${slug}" não encontrado no cache. Resolvendo on-demand...`);
+    anime = await resolveAnimeOnDemand(slug);
+  }
   if (!anime) throw new Error(`Anime ${slug} não encontrado`);
 
-  const epData = anime.episodes?.[String(ep)];
+  let epData = anime.episodes?.[String(ep)];
+  if (!epData) {
+    // Tenta formato alternativo caso seja "1" e a chave seja "01" ou vice-versa
+    const num = String(parseInt(ep, 10));
+    const altKey = Object.keys(anime.episodes || {}).find(k => String(parseInt(k, 10)) === num);
+    if (altKey) epData = anime.episodes[altKey];
+  }
   if (!epData) throw new Error(`Episódio ${ep} não encontrado para ${slug}`);
 
   const ORDER = ['af', 'gy', 'ao', 'ad', 'ma'];
@@ -1574,6 +1758,7 @@ export {
   // Core
   addAnimeToDb,
   getVideoSource,
+  resolveAnimeOnDemand,
   syncAiringAnimes,
   fetchLatestReleases,
   // Bulk import

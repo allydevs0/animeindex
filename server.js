@@ -22,6 +22,7 @@ import {
   saveUsers,
   addAnimeToDb,
   getVideoSource,
+  resolveAnimeOnDemand,
   syncAiringAnimes,
   fetchLatestReleases,
   bulkImportGoyabu,
@@ -515,38 +516,10 @@ const server = http.createServer(async (req, res) => {
     const slug = segment.replace('anime/', '');
     let animeData = loadAnimeFile(slug);
 
-    if (!animeData) {
-      const index = loadIndex();
-      const entry = index.animes[slug];
-      if (entry) {
-        // Se existe no index mas o arquivo sumiu ou é lazy, tenta baixar na hora
-        const targetUrl = entry.lazyUrl || entry.source_url || `https://animefire.plus/animes/${slug}-todos-os-episodios`;
-        try {
-          animeData = await addAnimeToDb(targetUrl);
-        } catch (err) {
-          // Se falhou com o título principal e tiver título em JP, tenta raspar usando o japonês
-          if (entry.title_jp) {
-            const jpSlug = slugify(entry.title_jp);
-            const jpUrl = `https://animefire.plus/animes/${jpSlug}-todos-os-episodios`;
-            try {
-              console.log(`[fallback] Titulo normal falhou. Tentando titulo JP: ${jpUrl}`);
-              animeData = await addAnimeToDb(jpUrl);
-              
-              // Otimização: se o JP deu certo, atualiza o lazyUrl do título original para bater no JP direto na próxima
-              const idx = loadIndex();
-              if (idx.animes[slug]) {
-                idx.animes[slug].lazyUrl = jpUrl;
-                saveIndex(idx);
-              }
-            } catch (err2) {
-              return respond(res, 500, { error: `Falha ao extrair detalhes (ambos os titulos falharam)` });
-            }
-          } else {
-            return respond(res, 500, { error: `Falha ao extrair detalhes (lazy/fallback): ${err.message}` });
-          }
-        }
-      } else {
-        return respond(res, 404, { error: 'Anime não encontrado no banco de dados' });
+    if (!animeData || !animeData.episodes || Object.keys(animeData.episodes).length === 0) {
+      animeData = await resolveAnimeOnDemand(slug);
+      if (!animeData) {
+        return respond(res, 404, { error: 'Anime não encontrado no catálogo' });
       }
     }
 
