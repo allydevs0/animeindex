@@ -19,7 +19,7 @@ const USERS_PATH    = path.join(DATA_DIR, 'users.json.gz');
 const SESSIONS_LOG_PATH = path.join(DATA_DIR, 'sessions_log.json.gz');
 
 
-const PROXY_URL = 'https://black-scene-6407.allydevs0.workers.dev/?url=';
+const PROXY_URL = process.env.PROXY_URL || 'https://black-scene-6407.allydevs0.workers.dev/?url=';
 
 /* ==========================================
    FILESYSTEM HELPERS
@@ -688,13 +688,13 @@ async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
 
   try {
     // Step 1: Fetch the Blogger embed page
-    const res = await fetch(bloggerUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(timeout),
-    });
-    console.log(`[resolveBlogger] Embed page HTTP ${res.status}`);
-    if (!res.ok) return null;
-    const html = await res.text();
+    let html = '';
+    try {
+      html = await fetchHtml(bloggerUrl, { timeout });
+    } catch (e) {
+      console.log(`[resolveBlogger] Embed page fetch failed: ${e.message}`);
+      return null;
+    }
     console.log(`[resolveBlogger] Embed page length=${html.length}`);
 
     // Try direct stream extraction first
@@ -737,24 +737,39 @@ async function resolveBloggerUrl(bloggerUrl, { timeout = 15000 } = {}) {
 
     const rpcBody = `f.req=%5B%5B%5B%22WcwnYd%22%2C%22%5B%5C%22${token}%5C%22%2C%5C%22%5C%22%2C0%5D%22%2Cnull%2C%22generic%22%5D%5D%5D&`;
 
+    const rpcHeaders = {
+      'accept': '*/*',
+      'accept-language': 'en-US,en;q=0.9',
+      'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+      'priority': 'u=1, i',
+      'sec-fetch-dest': 'empty',
+      'sec-fetch-mode': 'cors',
+      'sec-fetch-site': 'same-origin',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'x-same-domain': '1',
+      'Referer': 'https://www.blogger.com/',
+    };
+
     console.log(`[resolveBlogger] Calling RPC...`);
-    const rpcRes = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: {
-        'accept': '*/*',
-        'accept-language': 'en-US,en;q=0.9',
-        'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
-        'priority': 'u=1, i',
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'same-origin',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'x-same-domain': '1',
-        'Referer': 'https://www.blogger.com/',
-      },
-      body: rpcBody,
-      signal: AbortSignal.timeout(timeout),
-    });
+    let rpcRes;
+    const targetRpcUrl = PROXY_URL ? (PROXY_URL + encodeURIComponent(rpcUrl)) : rpcUrl;
+    try {
+      rpcRes = await fetch(targetRpcUrl, {
+        method: 'POST',
+        headers: rpcHeaders,
+        body: rpcBody,
+        signal: AbortSignal.timeout(timeout),
+      });
+      if (!rpcRes.ok) throw new Error(`HTTP ${rpcRes.status}`);
+    } catch (errRpc) {
+      console.warn(`[resolveBlogger] Proxy RPC failed (${errRpc.message}), trying direct...`);
+      rpcRes = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: rpcHeaders,
+        body: rpcBody,
+        signal: AbortSignal.timeout(timeout),
+      });
+    }
 
     console.log(`[resolveBlogger] RPC HTTP ${rpcRes.status}`);
     if (!rpcRes.ok) return null;
@@ -1122,7 +1137,7 @@ async function bulkImportAnimesOnline(onProgress = null) {
 
   for (const sitemap of sitemaps) {
     try {
-      const text = await fetchHtml(sitemap, { timeout: 60000, direct: true });
+      const text = await fetchHtml(sitemap, { timeout: 60000 });
       const locRegex = /<loc>(https:\/\/animesonlinecc\.to\/anime\/([^/]+)\/)<\/loc>/g;
       let match;
       while ((match = locRegex.exec(text)) !== null) {
@@ -1173,7 +1188,7 @@ async function bulkImportMeusAnimes(onProgress = null) {
 
   for (const sitemap of sitemaps) {
     try {
-      const text = await fetchHtml(sitemap, { timeout: 60000, direct: true });
+      const text = await fetchHtml(sitemap, { timeout: 60000 });
       const locRegex = /<loc>(https:\/\/meusanimes\.blog\/anime\/([^/]+)\/)<\/loc>/g;
       let match;
       while ((match = locRegex.exec(text)) !== null) {
