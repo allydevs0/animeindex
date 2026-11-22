@@ -715,28 +715,13 @@ async function extractMeusAnimes(pageUrl) {
             }
           }
 
-          // Se for Blogger token/URL, resolve para streaming direto do Google CDN!
-          if (vUrl.includes('blogger.com')) {
-            const resolved = await resolveBloggerUrl(vUrl);
-            if (resolved) {
-              if (typeof resolved === 'string') {
-                if (resolved.includes('.m3u8')) return { type: 'hls', url: resolved };
-                if (resolved.includes('.mp4') || resolved.includes('googlevideo.com')) return { type: 'direct', url: resolved };
-              } else {
-                const { hd, sd } = resolved;
-                const directUrl = hd || sd;
-                if (directUrl) {
-                  if (directUrl.includes('.m3u8')) return { type: 'hls', url: directUrl, hd, sd };
-                  if (directUrl.includes('.mp4') || directUrl.includes('googlevideo.com')) {
-                    return { type: 'direct', url: directUrl, hd, sd };
-                  }
-                }
-              }
-            }
+          // Se for Blogger token/URL, entrega como iframe nativo (Google CDN direto com IP do cliente, sem bloqueio 403)
+          if (vUrl.includes('blogger.com') || vUrl.includes('/video.g')) {
+            return { type: 'iframe', url: vUrl, server: 'MeusAnimes (Blogger)' };
           }
 
           if (vUrl.includes('.m3u8')) return { type: 'hls', url: vUrl };
-          if (vUrl.includes('.mp4') || vUrl.includes('googlevideo.com')) return { type: 'direct', url: vUrl };
+          if (vUrl.includes('.mp4') && !vUrl.includes('googlevideo.com')) return { type: 'direct', url: vUrl };
           return { type: 'iframe', url: vUrl };
         }
       } catch {}
@@ -747,23 +732,7 @@ async function extractMeusAnimes(pageUrl) {
   // Se houver Blogger diretamente na página HTML
   const bloggerDirect = html.match(/https?:\/\/(?:www\.)?blogger\.com\/video\.g\?token=[^\s"'<>]+/i);
   if (bloggerDirect) {
-    const resolved = await resolveBloggerUrl(bloggerDirect[0]);
-    if (resolved) {
-      if (typeof resolved === 'string') {
-        if (resolved.includes('.m3u8')) return { type: 'hls', url: resolved };
-        if (resolved.includes('.mp4') || resolved.includes('googlevideo.com')) return { type: 'direct', url: resolved };
-      } else {
-        const { hd, sd } = resolved;
-        const directUrl = hd || sd;
-        if (directUrl) {
-          if (directUrl.includes('.m3u8')) return { type: 'hls', url: directUrl, hd, sd };
-          if (directUrl.includes('.mp4') || directUrl.includes('googlevideo.com')) {
-            return { type: 'direct', url: directUrl, hd, sd };
-          }
-        }
-      }
-    }
-    return { type: 'iframe', url: bloggerDirect[0] };
+    return { type: 'iframe', url: bloggerDirect[0], server: 'MeusAnimes (Blogger)' };
   }
 
   const m3u8 = html.match(/https?:\/\/[^\s"'<>]+?\.m3u8[^\s"'<>]*/i);
@@ -789,24 +758,11 @@ async function extractGoyabu(pageUrl) {
         if (player.url_encrypted) url = decryptBlogger(player.url_encrypted);
 
         if (url) {
-          // Tentar resolver blogger → stream direto
-          const resolved = await resolveBloggerUrl(url);
-          if (resolved) {
-            // Handle both old string format and new {hd, sd} object format
-            if (typeof resolved === 'string') {
-              if (resolved.includes('.m3u8')) return { type: 'hls', url: resolved };
-              if (resolved.includes('.mp4')) return { type: 'direct', url: resolved };
-            } else {
-              const { hd, sd } = resolved;
-              const directUrl = hd || sd;
-              if (directUrl) {
-                if (directUrl.includes('.m3u8')) return { type: 'hls', url: directUrl, hd, sd };
-                if (directUrl.includes('.mp4') || directUrl.includes('googlevideo.com')) {
-                  return { type: 'direct', url: directUrl, hd, sd };
-                }
-              }
-            }
+          if (url.includes('blogger.com') || url.includes('/video.g')) {
+            return { type: 'iframe', url, server: 'Goyabu (Blogger)' };
           }
+          if (url.includes('.m3u8')) return { type: 'hls', url };
+          if (url.includes('.mp4') && !url.includes('googlevideo.com')) return { type: 'direct', url };
           return { type: 'iframe', url };
         }
       }
@@ -817,22 +773,11 @@ async function extractGoyabu(pageUrl) {
   if (btnMatch) {
     const dec = decryptBlogger(btnMatch[1]);
     if (dec) {
-      const resolved = await resolveBloggerUrl(dec);
-      if (resolved) {
-        if (typeof resolved === 'string') {
-          if (resolved.includes('.m3u8')) return { type: 'hls', url: resolved };
-          if (resolved.includes('.mp4')) return { type: 'direct', url: resolved };
-        } else {
-          const { hd, sd } = resolved;
-          const directUrl = hd || sd;
-          if (directUrl) {
-            if (directUrl.includes('.m3u8')) return { type: 'hls', url: directUrl, hd, sd };
-            if (directUrl.includes('.mp4') || directUrl.includes('googlevideo.com')) {
-              return { type: 'direct', url: directUrl, hd, sd };
-            }
-          }
-        }
+      if (dec.includes('blogger.com') || dec.includes('/video.g')) {
+        return { type: 'iframe', url: dec, server: 'Goyabu (Blogger)' };
       }
+      if (dec.includes('.m3u8')) return { type: 'hls', url: dec };
+      if (dec.includes('.mp4') && !dec.includes('googlevideo.com')) return { type: 'direct', url: dec };
       return { type: 'iframe', url: dec };
     }
   }
@@ -852,45 +797,13 @@ async function extractAnimesOnline(pageUrl) {
     let u = bloggerMatch[1];
     if (u.startsWith('//')) u = 'https:' + u;
     const url = decodeURIComponent(u);
-    const direct = await resolveBloggerUrl(url);
-    if (direct) {
-      if (typeof direct === 'string') {
-        if (direct.includes('.m3u8')) return { type: 'hls', url: direct, hd: direct, sd: null };
-        if (direct.includes('.mp4') || direct.includes('googlevideo.com')) return { type: 'direct', url: direct, hd: direct, sd: null };
-      } else {
-        const { hd, sd } = direct;
-        const directUrl = hd || sd;
-        if (directUrl) {
-          if (directUrl.includes('.m3u8')) return { type: 'hls', url: directUrl, hd, sd };
-          if (directUrl.includes('.mp4') || directUrl.includes('googlevideo.com')) {
-            return { type: 'direct', url: directUrl, hd, sd };
-          }
-        }
-      }
-    }
-    return { type: 'iframe', url };
+    return { type: 'iframe', url, server: 'AnimesOnline (Blogger)' };
   }
 
   const tokenMatch = html.match(/blogger\.com\/video\.g\?token=([^"&]+)/i);
   if (tokenMatch) {
     const url = `https://www.blogger.com/video.g?token=${tokenMatch[1]}`;
-    const direct = await resolveBloggerUrl(url);
-    if (direct) {
-      if (typeof direct === 'string') {
-        if (direct.includes('.m3u8')) return { type: 'hls', url: direct, hd: direct, sd: null };
-        if (direct.includes('.mp4') || direct.includes('googlevideo.com')) return { type: 'direct', url: direct, hd: direct, sd: null };
-      } else {
-        const { hd, sd } = direct;
-        const directUrl = hd || sd;
-        if (directUrl) {
-          if (directUrl.includes('.m3u8')) return { type: 'hls', url: directUrl, hd, sd };
-          if (directUrl.includes('.mp4') || directUrl.includes('googlevideo.com')) {
-            return { type: 'direct', url: directUrl, hd, sd };
-          }
-        }
-      }
-    }
-    return { type: 'iframe', url };
+    return { type: 'iframe', url, server: 'AnimesOnline (Blogger)' };
   }
 
   const m3u8 = html.match(/https?:\/\/[^\s"'<>]+?\.m3u8[^\s"'<>]*/i);
@@ -1738,83 +1651,58 @@ async function getVideoSource(slug, ep) {
       cachedUrl = rawCache;
     }
 
-// Cache hit (exceto AnimeFire — URLs expiram)
-     if (cachedUrl && prov !== 'af') {
-       // Se já é URL direta (m3u8/mp4/googlevideo), retornar direto
-       if (cachedUrl.includes('.m3u8') || cachedUrl.includes('.mp4') || cachedUrl.includes('googlevideo.com') || cachedUrl.includes('lightspeedst')) {
-         const type = cachedUrl.includes('.m3u8') ? 'hls' : 'direct';
-         // Agora sempre devolve hd/sd quando o cache já os tiver
-         return { type, url: cachedUrl, hd: cachedHd, sd: cachedSd };
-       }
-       // Se o cache é um blogger/iframe, tentar resolver
-       if (cachedUrl.includes('blogger.com') || cachedUrl.includes('.html')) {
-         const resolved = await resolveBloggerUrl(cachedUrl);
-         if (resolved) {
-           let resolvedUrl;
-           if (typeof resolved === 'string') {
-             resolvedUrl = resolved;
-             anime.episodes[String(ep)][prov][1] = { hd: resolvedUrl, sd: null };
-             saveAnimeFile(slug, anime);
-             const type = resolvedUrl.includes('.m3u8') ? 'hls' : 'direct';
-             return { type, url: resolvedUrl, hd: resolvedUrl, sd: null };
-           } else {
-             const { hd, sd } = resolved;
-             const directUrl = hd || sd;
-             if (directUrl) {
-               // Guarda as DUAS qualidades no cache, não só a escolhida
-               anime.episodes[String(ep)][prov][1] = { hd, sd };
-               saveAnimeFile(slug, anime);
-               const type = directUrl.includes('.m3u8') ? 'hls' : 'direct';
-               return { type, url: directUrl, hd, sd };
-             }
-           }
-         }
-         // Resolve falhou — limpar cache e re-extrair
-         console.log(`[getVideoSource] Cache blogger resolve falhou para ${prov}, re-extraindo...`);
-         anime.episodes[String(ep)][prov][1] = null;
-         saveAnimeFile(slug, anime);
-       }
-     }
+    // URLs do googlevideo.com expiram e são amarradas ao IP do servidor Render
+    if (cachedUrl && cachedUrl.includes('googlevideo.com')) {
+      cachedUrl = null;
+      cachedHd = null;
+      cachedSd = null;
+    }
 
-     // Extração
-     try {
-       let result = null;
-       if      (prov === 'af') result = await extractAnimeFire(pageUrl);
-       else if (prov === 'ad') result = await extractAnimesDigital(pageUrl);
-       else if (prov === 'ma') result = await extractMeusAnimes(pageUrl);
-       else if (prov === 'gy') result = await extractGoyabu(pageUrl);
-       else if (prov === 'ao') result = await extractAnimesOnline(pageUrl);
+    // Cache hit (exceto AnimeFire — URLs expiram)
+    if (cachedUrl && prov !== 'af') {
+      // Se o cache é Blogger ou iframe, entrega direto como iframe (player oficial do Blogger no Google CDN sem 403)
+      if (cachedUrl.includes('blogger.com') || cachedUrl.includes('/video.g') || cachedUrl.includes('.html')) {
+        return { type: 'iframe', url: cachedUrl, server: 'Blogger Player' };
+      }
 
-       if (result) {
-         // Se o resultado é iframe (blogger), resolver para URL direta
-         if (result.type === 'iframe' && result.url) {
-           const resolved = await resolveBloggerUrl(result.url);
-           if (resolved) {
-             if (typeof resolved === 'string') {
-               const directUrl = resolved;
-               result = { type: directUrl.includes('.m3u8') ? 'hls' : 'direct', url: directUrl, hd: directUrl, sd: null };
-             } else {
-               const { hd, sd } = resolved;
-               const directUrl = hd || sd;
-               if (directUrl) {
-                 result = { type: directUrl.includes('.m3u8') ? 'hls' : 'direct', url: directUrl, hd, sd };
-               }
-             }
-           }
-         }
-         // Cachear as DUAS qualidades (hd e sd), não só a URL escolhida
-         if (prov !== 'af') {
-           const cacheVal = (result.hd || result.sd)
-             ? { hd: result.hd || null, sd: result.sd || null }
-             : (result.url ? { hd: result.url, sd: null } : null);
-           anime.episodes[String(ep)][prov][1] = cacheVal;
-           saveAnimeFile(slug, anime);
-         }
-         return result;
-       }
-     } catch (err) {
-       console.warn(`[extractor] ${prov} falhou para ${slug} EP${ep}:`, err.message);
-     }
+      // Se já é URL direta (m3u8 ou mp4 direto que não seja googlevideo)
+      if (cachedUrl.includes('.m3u8') || cachedUrl.includes('.mp4') || cachedUrl.includes('lightspeedst')) {
+        const type = cachedUrl.includes('.m3u8') ? 'hls' : 'direct';
+        return { type, url: cachedUrl, hd: cachedHd, sd: cachedSd, server: 'Direct Player' };
+      }
+    }
+
+    // Extração
+    try {
+      let result = null;
+      if      (prov === 'af') result = await extractAnimeFire(pageUrl);
+      else if (prov === 'ad') result = await extractAnimesDigital(pageUrl);
+      else if (prov === 'ma') result = await extractMeusAnimes(pageUrl);
+      else if (prov === 'gy') result = await extractGoyabu(pageUrl);
+      else if (prov === 'ao') result = await extractAnimesOnline(pageUrl);
+
+      if (result) {
+        // Se for Blogger ou iframe, manter como iframe nativo
+        if (result.url && (result.url.includes('blogger.com') || result.url.includes('/video.g'))) {
+          result.type = 'iframe';
+          result.server = result.server || 'Blogger Player';
+        }
+
+        // Cachear (nunca salvar googlevideo.com no cache)
+        if (prov !== 'af' && !result.url?.includes('googlevideo.com')) {
+          const cacheVal = (result.type === 'iframe')
+            ? result.url
+            : ((result.hd || result.sd)
+              ? { hd: result.hd || null, sd: result.sd || null }
+              : (result.url ? { hd: result.url, sd: null } : null));
+          anime.episodes[String(ep)][prov][1] = cacheVal;
+          saveAnimeFile(slug, anime);
+        }
+        return result;
+      }
+    } catch (err) {
+      console.warn(`[extractor] ${prov} falhou para ${slug} EP${ep}:`, err.message);
+    }
    }
 
    throw new Error(`Não foi possível extrair vídeo para ${slug} EP${ep}`);

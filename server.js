@@ -128,27 +128,31 @@ function createSession(username) {
 }
 
 /* ==========================================
-   HELPERS
+   HELPERS & CORS
 ========================================== */
-function isOriginAllowed(origin) {
-  if (!origin) return true;
-  if (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) return true;
-  if (origin.endsWith('.vercel.app')) return true;
-  if (origin.includes('onrender.com')) return true;
-  return ['https://animeindex-six.vercel.app', 'http://localhost:5173', 'http://localhost:4173', 'https://animeindex-28ua.onrender.com'].includes(origin);
+function getCorsHeaders(req) {
+  const origin = req?.headers?.origin;
+  const headers = {
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE, HEAD',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user, Range, Accept',
+    'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
+  };
+  if (origin) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+  } else {
+    headers['Access-Control-Allow-Origin'] = '*';
+  }
+  return headers;
 }
 
 function respond(res, status, data, contentType = 'application/json') {
   const body = contentType === 'application/json' ? JSON.stringify(data) : data;
-  const origin = res.req?.headers?.origin;
-  const allowOrigin = (origin && isOriginAllowed(origin)) ? origin : (origin || '*');
+  const cors = getCorsHeaders(res.req);
   
   res.writeHead(status, {
     'Content-Type': contentType,
-    'Access-Control-Allow-Origin':  allowOrigin,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user',
-    'Access-Control-Allow-Credentials': 'true'
+    ...cors
   });
   res.end(body);
 }
@@ -199,6 +203,7 @@ function broadcastBulk(data) {
    HTTP SERVER
 ========================================== */
 const server = http.createServer(async (req, res) => {
+  res.req = req;
   const ip       = req.socket.remoteAddress || '';
   const url      = new URL(req.url, `http://localhost:${PORT}`);
   let pathname = url.pathname.replace(/\/+/g, '/');
@@ -212,15 +217,7 @@ const server = http.createServer(async (req, res) => {
   if (!checkRateLimit(ip)) return respond(res, 429, { error: 'Too many requests' });
 
   if (method === 'OPTIONS') {
-    const origin = req.headers.origin;
-    const allowOrigin = (origin && isOriginAllowed(origin)) ? origin : (origin || '*');
-    
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin':  allowOrigin,
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user',
-      'Access-Control-Allow-Credentials': 'true'
-    });
+    res.writeHead(204, getCorsHeaders(req));
     res.end();
     return;
   }
@@ -232,12 +229,6 @@ const server = http.createServer(async (req, res) => {
       respond(res, 200, { message: 'AnimeKaiKai! API — rode npm run dev para o frontend.' });
     }
     return;
-  }
-
-  // Security: Block unauthorized origins
-  const origin = req.headers.origin;
-  if (origin && !isOriginAllowed(origin)) {
-    return respond(res, 403, { error: 'Forbidden: Origin not allowed' });
   }
 
   // =====================
@@ -681,11 +672,10 @@ const server = http.createServer(async (req, res) => {
   // ─── GET /api/bulk/stream — SSE do progresso de bulk ──────────────
   if (segment === 'bulk/stream' && method === 'GET') {
     res.writeHead(200, {
-      'Content-Type':                'text/event-stream',
-      'Cache-Control':               'no-cache',
-      'Connection':                  'keep-alive',
-      'Access-Control-Allow-Origin': req.headers.origin || '*',
-      'Access-Control-Allow-Credentials': 'true'
+      'Content-Type':  'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection':    'keep-alive',
+      ...getCorsHeaders(req)
     });
     res.write(`data: ${JSON.stringify({ type: 'connected', running: bulkRunning, lastLog: bulkLastLog })}\n\n`);
     bulkClients.add(res);
