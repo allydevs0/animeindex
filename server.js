@@ -252,10 +252,10 @@ const server = http.createServer(async (req, res) => {
   // ─── GET /api/version ─────────────────────────────────────────────
   if (segment === 'version' && method === 'GET') {
     return respond(res, 200, {
-      version: '2.1.0',
-      codename: 'BloggerRPC',
-      deploy: 'backend branch → main',
-      features: ['blogger-rpc-resolve', 're-extract-on-stale-cache'],
+      version: '2.2.0',
+      codename: 'CloudflareWorkerProxy',
+      branch: 'backend',
+      features: ['worker-proxy', 'blogger-rpc-resolve', 're-extract-on-stale-cache'],
       timestamp: new Date().toISOString(),
     });
   }
