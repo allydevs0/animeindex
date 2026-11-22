@@ -483,9 +483,14 @@ async function scrapeAnimesDigital(url) {
 async function scrapeMeusAnimes(url) {
   if (url.includes('/e/')) {
     const html = await fetchHtml(url);
-    const m = html.match(/href=['"]( https:\/\/meusanimes\.blog\/a\/[^'"]+)['"]/);
+    const m = html.match(/href=['"](https?:\/\/meusanimes\.blog\/a\/[^'"]+)['"]/i);
     if (!m) throw new Error('Página de anime não encontrada no MeusAnimes');
     url = m[1].trim();
+  }
+
+  // Normaliza URLs com /anime/ para /a/
+  if (url.includes('/anime/')) {
+    url = url.replace('/anime/', '/a/');
   }
 
   const html = await fetchHtml(url);
@@ -493,7 +498,8 @@ async function scrapeMeusAnimes(url) {
   const titleMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
   const title = titleMatch ? decodeHtmlEntities(stripTags(titleMatch[1])) : 'Anime';
 
-  const coverMatch = html.match(/<div class="poster">\s*<img[^>]+src=['"]([^'"]+)['"]/i);
+  const coverMatch = html.match(/<div class="poster">\s*<img[^>]+src=['"]([^'"]+)['"]/i)
+    || html.match(/property="og:image"\s+content=['"]([^'"]+)['"]/i);
   const cover_url = coverMatch ? coverMatch[1].trim() : '';
 
   const synopsisMatch = html.match(/<div itemprop="description"[^>]*>([\s\S]*?)<\/div>/i)
@@ -501,16 +507,18 @@ async function scrapeMeusAnimes(url) {
   const synopsis = synopsisMatch ? decodeHtmlEntities(stripTags(synopsisMatch[1])) : '';
 
   const genres = [];
-  const genreRegex = /href=['"]https:\/\/meusanimes\.blog\/(?:genero|g)\/([^'"\/]+)\/?['"][^>]*>(.*?)<\/a>/gi;
+  const genreRegex = /href=['"]https?:\/\/meusanimes\.blog\/(?:genero|g)\/([^'"\/]+)\/?['"][^>]*>(.*?)<\/a>/gi;
   let gm;
   while ((gm = genreRegex.exec(html)) !== null) genres.push(gm[2]);
 
   const episodes = {};
-  const epRegex = /href=['"]( https:\/\/meusanimes\.blog\/e\/[^'"]+)['"]/gi;
+  const epRegex = /href=['"](https?:\/\/meusanimes\.blog\/e\/[^'"]+)['"]/gi;
   let em;
   while ((em = epRegex.exec(html)) !== null) {
     const epUrl = em[1].trim();
-    const numMatch = epUrl.match(/-([0-9.]+)\/?$/);
+    const clean = epUrl.replace(/\/+$/, '');
+    const numMatch = clean.match(/(?:episodio|ep|temp-[0-9]+-ep|temporada-[0-9]+-ep)-?([0-9.]+)/i)
+      || clean.match(/-([0-9.]+)$/);
     const epNum = numMatch ? numMatch[1] : null;
     if (epNum && !episodes[epNum]) episodes[epNum] = { ma: [epUrl, null] };
   }
@@ -656,13 +664,19 @@ async function extractAnimesDigital(pageUrl) {
   return null;
 }
 
-/** MeusAnimes — meusdoramas API ou iframe */
+/** MeusAnimes — meusdoramas API ou iframe com resolução de Blogger */
 async function extractMeusAnimes(pageUrl) {
   const html = await fetchHtml(pageUrl);
 
-  const iframeMatch = html.match(/iframe[^>]+src="([^"]*meusdoramas\.club\/[^"]+)"/i);
+  const iframeMatch = html.match(/iframe[^>]+src=["']([^"']*(?:meusdoramas\.club|serv\d+\.[^"']+)[^"']*)["']/i);
   if (iframeMatch) {
     const mdUrl = iframeMatch[1];
+    let host = 'serv01.meusdoramas.club';
+    try {
+      const parsedHost = new URL(mdUrl).host;
+      if (parsedHost) host = parsedHost;
+    } catch {}
+
     const pathMatch = mdUrl.match(/video\/(\d+)\/(\d+)\/(\d+)/);
     let tmdb, season, episode;
     if (pathMatch) {
@@ -675,18 +689,88 @@ async function extractMeusAnimes(pageUrl) {
         episode = urlObj.searchParams.get('episode_number') || urlObj.searchParams.get('episode');
       } catch {}
     }
+
     if (tmdb && season && episode) {
       try {
-        const apiUrl = `https://serv01.meusdoramas.club/posts/get-video.php?episode_number=${episode}&season_number=${season}&tmdb=${tmdb}`;
-        const json = await fetchJson(apiUrl);
-        if (json.success && json.videoUrl) return { type: 'iframe', url: json.videoUrl };
+        const apiUrl = `https://${host}/posts/get-video.php?episode_number=${episode}&season_number=${season}&tmdb=${tmdb}`;
+        const headers = {
+          'Origin': `https://${host}`,
+          'Referer': `https://${host}/#/video/${tmdb}/${season}/${episode}/`,
+        };
+        const json = await fetchJson(apiUrl, { headers });
+        if (json.success && json.videoUrl) {
+          let vUrl = json.videoUrl;
+
+          // Se for selector multi-servidor (/e/?a=...), tenta o primeiro servidor
+          if (vUrl.includes('/e/?')) {
+            const serverMatch = vUrl.match(/[?&][a-c]=(\d+)\/(\d+)\/(\d+)/);
+            if (serverMatch) {
+              const [, subTmdb, subSeason, subEp] = serverMatch;
+              try {
+                const subJson = await fetchJson(`https://${host}/posts/get-video.php?episode_number=${subEp}&season_number=${subSeason}&tmdb=${subTmdb}`, { headers });
+                if (subJson.success && subJson.videoUrl) {
+                  vUrl = subJson.videoUrl;
+                }
+              } catch {}
+            }
+          }
+
+          // Se for Blogger token/URL, resolve para streaming direto do Google CDN!
+          if (vUrl.includes('blogger.com')) {
+            const resolved = await resolveBloggerUrl(vUrl);
+            if (resolved) {
+              if (typeof resolved === 'string') {
+                if (resolved.includes('.m3u8')) return { type: 'hls', url: resolved };
+                if (resolved.includes('.mp4') || resolved.includes('googlevideo.com')) return { type: 'direct', url: resolved };
+              } else {
+                const { hd, sd } = resolved;
+                const directUrl = hd || sd;
+                if (directUrl) {
+                  if (directUrl.includes('.m3u8')) return { type: 'hls', url: directUrl, hd, sd };
+                  if (directUrl.includes('.mp4') || directUrl.includes('googlevideo.com')) {
+                    return { type: 'direct', url: directUrl, hd, sd };
+                  }
+                }
+              }
+            }
+          }
+
+          if (vUrl.includes('.m3u8')) return { type: 'hls', url: vUrl };
+          if (vUrl.includes('.mp4') || vUrl.includes('googlevideo.com')) return { type: 'direct', url: vUrl };
+          return { type: 'iframe', url: vUrl };
+        }
       } catch {}
     }
     return { type: 'iframe', url: mdUrl };
   }
 
+  // Se houver Blogger diretamente na página HTML
+  const bloggerDirect = html.match(/https?:\/\/(?:www\.)?blogger\.com\/video\.g\?token=[^\s"'<>]+/i);
+  if (bloggerDirect) {
+    const resolved = await resolveBloggerUrl(bloggerDirect[0]);
+    if (resolved) {
+      if (typeof resolved === 'string') {
+        if (resolved.includes('.m3u8')) return { type: 'hls', url: resolved };
+        if (resolved.includes('.mp4') || resolved.includes('googlevideo.com')) return { type: 'direct', url: resolved };
+      } else {
+        const { hd, sd } = resolved;
+        const directUrl = hd || sd;
+        if (directUrl) {
+          if (directUrl.includes('.m3u8')) return { type: 'hls', url: directUrl, hd, sd };
+          if (directUrl.includes('.mp4') || directUrl.includes('googlevideo.com')) {
+            return { type: 'direct', url: directUrl, hd, sd };
+          }
+        }
+      }
+    }
+    return { type: 'iframe', url: bloggerDirect[0] };
+  }
+
   const m3u8 = html.match(/https?:\/\/[^\s"'<>]+?\.m3u8[^\s"'<>]*/i);
   if (m3u8) return { type: 'hls', url: m3u8[0] };
+
+  const ifrSrc = html.match(/<iframe[^>]+src=["'](https?:\/\/[^"']+)["']/i);
+  if (ifrSrc) return { type: 'iframe', url: ifrSrc[1] };
 
   return null;
 }
@@ -1345,13 +1429,14 @@ async function bulkImportMeusAnimes(onProgress = null) {
   
   const sitemaps = [
     'https://meusanimes.blog/tvshows-sitemap1.xml',
-    'https://meusanimes.blog/tvshows-sitemap2.xml'
+    'https://meusanimes.blog/tvshows-sitemap2.xml',
+    'https://meusanimes.blog/tvshows-sitemap3.xml',
   ];
 
   for (const sitemap of sitemaps) {
     try {
       const text = await fetchHtml(sitemap, { timeout: 60000 });
-      const locRegex = /<loc>(https:\/\/meusanimes\.blog\/anime\/([^/]+)\/)<\/loc>/g;
+      const locRegex = /<loc>(https:\/\/meusanimes\.blog\/a\/([^/]+)\/)<\/loc>/g;
       let match;
       while ((match = locRegex.exec(text)) !== null) {
         const rawUrl = match[1];
@@ -1447,8 +1532,9 @@ async function resolveAnimeOnDemand(slug) {
   for (const s of candidateSlugs) {
     const urls = [
       `https://animesonlinecc.to/anime/${s}/`,
+      `https://meusanimes.blog/a/${s}/`,
+      `https://meusanimes.blog/a/${s}-dublado/`,
       `https://animefire.plus/animes/${s}-todos-os-episodios`,
-      `https://meusanimes.blog/anime/${s}/`,
       `https://animesonlinecc.to/anime/${s}-2/`,
       `https://animesonlinecc.to/anime/${s}-2-temporada/`,
     ];
@@ -1521,8 +1607,9 @@ async function resolveMissingEpisode(slug, ep, anime) {
   for (const s of candidateSlugs) {
     const urls = [
       `https://animesonlinecc.to/anime/${s}/`,
+      `https://meusanimes.blog/a/${s}/`,
+      `https://meusanimes.blog/a/${s}-dublado/`,
       `https://animefire.plus/animes/${s}-todos-os-episodios`,
-      `https://meusanimes.blog/anime/${s}/`,
     ];
 
     for (const u of urls) {
@@ -1554,9 +1641,11 @@ async function resolveMissingEpisode(slug, ep, anime) {
     const directEpisodeCandidates = [
       { prov: 'ao', url: `https://animesonlinecc.to/episodio/${s}-episodio-${epKey}/` },
       { prov: 'ao', url: `https://animesonlinecc.to/episodio/${s}-episodio-${epPad}/` },
-      { prov: 'af', url: `https://animefire.plus/video/${s}/${epKey}` },
       { prov: 'ma', url: `https://meusanimes.blog/e/${s}-episodio-${epKey}/` },
       { prov: 'ma', url: `https://meusanimes.blog/e/${s}-episodio-${epPad}/` },
+      { prov: 'ma', url: `https://meusanimes.blog/e/${s}-dublado-episodio-${epKey}/` },
+      { prov: 'ma', url: `https://meusanimes.blog/e/${s}-dublado-episodio-${epPad}/` },
+      { prov: 'af', url: `https://animefire.plus/video/${s}/${epKey}` },
     ];
 
     for (const item of directEpisodeCandidates) {
